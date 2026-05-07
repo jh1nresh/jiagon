@@ -29,6 +29,7 @@ function decodeSignature(value: unknown) {
     if (!looksBase64) {
       const decoded = bs58.decode(signature);
       if (decoded.length === 64) return decoded;
+      return null;
     }
   } catch {
     // Fall through to base64 decoding.

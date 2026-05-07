@@ -198,8 +198,8 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
       });
       setReceipt({
         ...payload.receipt,
-        mintStatus: "ready",
-        creditImpact: {
+        mintStatus: payload.receipt.mintStatus || "ready",
+        creditImpact: payload.receipt.creditImpact || {
           eligible: false,
           unlockedCreditUsd: 0,
           reason: "Merchant receipt must be minted as a Bubblegum cNFT before credit unlock.",

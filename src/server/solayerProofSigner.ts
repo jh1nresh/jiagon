@@ -13,7 +13,57 @@ export function sha256Hex(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function signCanonicalPayload(canonical: string, signingSecret: string) {
+function signedCanonicalPayload(canonical: string, signedAt: string) {
+  return canonicalJson({ payload: canonical, signedAt });
+}
+
+function signCanonicalPayload(canonical: string, signingSecret: string, signedAt = new Date().toISOString()) {
+  const signedCanonical = signedCanonicalPayload(canonical, signedAt);
+  const digest = `0x${sha256Hex(signedCanonical)}`;
+  const signature = `0x${createHmac("sha256", signingSecret).update(signedCanonical).digest("hex")}`;
+
+  return {
+    algorithm: "HMAC-SHA256" as const,
+    digest,
+    signature,
+    signedAt,
+  };
+}
+
+export function signSolayerProofAdapter(
+  proof: Omit<SolayerCreditProof, "signedAdapter">,
+  signingSecret: string,
+  signedAt?: string,
+) {
+  if (!signingSecret || signingSecret.length < 32) {
+    throw new Error("Solayer adapter signing secret is not configured.");
+  }
+
+  const canonical = canonicalJson(solayerProofSigningPayload(proof));
+  return signCanonicalPayload(canonical, signingSecret, signedAt);
+}
+
+function signLegacyLowercaseOwnerAdapter(
+  proof: Omit<SolayerCreditProof, "signedAdapter">,
+  signingSecret: string,
+  signedAt?: string,
+) {
+  const canonical = canonicalJson({
+    ...solayerProofSigningPayload(proof),
+    owner: proof.owner.toLowerCase(),
+  });
+  return signCanonicalPayload(canonical, signingSecret, signedAt);
+}
+
+function signUnsignedTimestampLegacyAdapter(
+  proof: Omit<SolayerCreditProof, "signedAdapter">,
+  signingSecret: string,
+  lowercaseOwner = false,
+) {
+  const payload = lowercaseOwner
+    ? { ...solayerProofSigningPayload(proof), owner: proof.owner.toLowerCase() }
+    : solayerProofSigningPayload(proof);
+  const canonical = canonicalJson(payload);
   const digest = `0x${sha256Hex(canonical)}`;
   const signature = `0x${createHmac("sha256", signingSecret).update(canonical).digest("hex")}`;
 
@@ -23,29 +73,6 @@ function signCanonicalPayload(canonical: string, signingSecret: string) {
     signature,
     signedAt: new Date().toISOString(),
   };
-}
-
-export function signSolayerProofAdapter(
-  proof: Omit<SolayerCreditProof, "signedAdapter">,
-  signingSecret: string,
-) {
-  if (!signingSecret || signingSecret.length < 32) {
-    throw new Error("Solayer adapter signing secret is not configured.");
-  }
-
-  const canonical = canonicalJson(solayerProofSigningPayload(proof));
-  return signCanonicalPayload(canonical, signingSecret);
-}
-
-function signLegacyLowercaseOwnerAdapter(
-  proof: Omit<SolayerCreditProof, "signedAdapter">,
-  signingSecret: string,
-) {
-  const canonical = canonicalJson({
-    ...solayerProofSigningPayload(proof),
-    owner: proof.owner.toLowerCase(),
-  });
-  return signCanonicalPayload(canonical, signingSecret);
 }
 
 function adapterMatches(candidate: SolayerCreditProof, expected: ReturnType<typeof signCanonicalPayload>) {
@@ -65,6 +92,7 @@ export function verifySolayerProofAdapter(proof: unknown, signingSecret: string)
   if (!candidate.signedAdapter?.signature || !candidate.signedAdapter?.digest) return null;
   if (!/^0x[a-fA-F0-9]{64}$/.test(candidate.signedAdapter.signature)) return null;
   if (!/^0x[a-fA-F0-9]{64}$/.test(candidate.signedAdapter.digest)) return null;
+  if (typeof candidate.signedAdapter.signedAt !== "string" || candidate.signedAdapter.signedAt.length < 10) return null;
   if (!/^0x[a-fA-F0-9]{64}$/.test(candidate.proofHash || "")) return null;
   if (typeof candidate.owner !== "string" || candidate.owner.length < 32 || candidate.owner.length > 44) return null;
   if (candidate.provider !== "solayer" || candidate.status !== "adapter-attested") return null;
@@ -77,11 +105,17 @@ export function verifySolayerProofAdapter(proof: unknown, signingSecret: string)
   } as Omit<SolayerCreditProof, "signedAdapter">;
 
   try {
-    const expected = signSolayerProofAdapter(unsigned, signingSecret);
+    const expected = signSolayerProofAdapter(unsigned, signingSecret, candidate.signedAdapter.signedAt);
     if (adapterMatches(candidate, expected)) return candidate;
 
-    const legacyExpected = signLegacyLowercaseOwnerAdapter(unsigned, signingSecret);
-    return adapterMatches(candidate, legacyExpected) ? candidate : null;
+    const legacyExpected = signLegacyLowercaseOwnerAdapter(unsigned, signingSecret, candidate.signedAdapter.signedAt);
+    if (adapterMatches(candidate, legacyExpected)) return candidate;
+
+    const unsignedTimestampExpected = signUnsignedTimestampLegacyAdapter(unsigned, signingSecret);
+    if (adapterMatches(candidate, unsignedTimestampExpected)) return candidate;
+
+    const unsignedTimestampLowercaseExpected = signUnsignedTimestampLegacyAdapter(unsigned, signingSecret, true);
+    return adapterMatches(candidate, unsignedTimestampLowercaseExpected) ? candidate : null;
   } catch {
     return null;
   }

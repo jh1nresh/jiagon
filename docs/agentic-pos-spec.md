@@ -5,7 +5,9 @@
 Jiagon Agentic POS is the order-intake layer for real-world commerce. Jiagon remains the receipt passport and credit layer.
 
 ```text
-personal agent order API / Telegram entry
+user says "I want coffee"
+-> personal agent order API
+-> payment approval / fallback
 -> merchant order queue
 -> merchant fulfillment
 -> NFC / QR receipt claim
@@ -19,20 +21,20 @@ The goal is not to replace Square, Toast, or a full POS. The MVP proves that an 
 
 ## Current Demo Links
 
-- Vercel preview: https://jiagon-git-codex-nfc-receipt-claim-station-jhinreshs-projects.vercel.app
-- Raposa NFC claim station: https://jiagon-git-codex-nfc-receipt-claim-station-jhinreshs-projects.vercel.app/tile/raposa-coffee
-- Merchant dashboard: https://jiagon-git-codex-nfc-receipt-claim-station-jhinreshs-projects.vercel.app/merchant
-- Passport: https://jiagon-git-codex-nfc-receipt-claim-station-jhinreshs-projects.vercel.app/passport
-
-After PR 61 merges, replace these preview URLs with the production Vercel domain before writing NFC stickers.
+- Live app: https://jiagon.vercel.app
+- Agent order demo: https://jiagon.vercel.app/agent-order
+- Raposa NFC claim station: https://jiagon.vercel.app/tile/raposa-coffee
+- Merchant dashboard: https://jiagon.vercel.app/merchant
+- Passport: https://jiagon.vercel.app/passport
+- Credit: https://jiagon.vercel.app/credit
 
 ## Product Boundary
 
 In scope:
 
-- Customer order intent from a personal agent API or Telegram.
+- Customer order intent from a personal agent API first; Telegram remains a pilot surface.
 - Merchant-facing order queue.
-- Pickup code and pickup ETA returned to the agent.
+- Agent-readable pickup result returned to the agent: merchant, pickup code, ETA, and user-facing instructions.
 - Optional Crypto Pay on Solana request for the agent/user wallet. Helio is the hosted Solana checkout path; direct Solana Pay is the fallback.
 - Merchant completion creates a claimable receipt.
 - NFC/QR receipt claim after fulfillment.
@@ -86,8 +88,8 @@ Early event pilots can use L2/L3. Credit scoring should weight L4/L5 higher when
 ### PR 4: Telegram Entry
 
 - Add `POST /api/telegram/webhook` for Telegram bot command integration.
-- Telegram creates the same order payload as `/tile/{merchant}`.
-- Bot returns pickup code and tells the customer to pay at the counter.
+- Telegram creates the same order payload as the agent API.
+- Bot returns pickup code and tells the customer the order is not a receipt yet.
 - Bot can post each new order into the merchant Telegram group.
 - Merchant staff can tap `[Paid + Done]` in Telegram to complete the order and create the receipt claim link.
 
@@ -98,6 +100,8 @@ Early event pilots can use L2/L3. Credit scoring should weight L4/L5 higher when
 - The endpoint enforces a max-spend policy before creating the order pass.
 - The response returns pickup code, pickup estimate, merchant staff dispatch
   status, NFC claim station URL, and optional Crypto Pay on Solana request details.
+- The response also returns `agentExecution`, which separates what the user sees
+  from what the personal agent handled.
 - Crypto Pay test requests are not yet payment-proof oracles; until
   a webhook or transaction query verifies payment, staff still taps `Paid + Done`
   after fulfillment.
@@ -116,11 +120,12 @@ Early event pilots can use L2/L3. Credit scoring should weight L4/L5 higher when
 ## Demo Flow
 
 ```text
-User asks personal agent: order one iced latte at Raposa Coffee
+User asks personal agent: I want a coffee, under $10
 -> agent calls POST /api/agent/orders with maxSpendUsd and paymentMode
--> Jiagon returns pickup code, pickup ETA, and optional Crypto Pay on Solana request
+-> Jiagon selects Raposa, creates the order, and prepares payment approval
+-> Jiagon returns pickup location, pickup code, pickup ETA, and optional Crypto Pay request
 -> merchant Telegram group receives the order
--> user pays through Crypto Pay if configured, otherwise pays normally at counter
+-> user approves Crypto Pay if configured, otherwise counter payment is fallback
 -> staff taps Paid + Done
 -> Jiagon issues claimable receipt
 -> user taps NFC receipt card at pickup
@@ -138,18 +143,17 @@ User asks personal agent: order one iced latte at Raposa Coffee
 Lead with one sentence:
 
 ```text
-Jiagon lets your personal agent buy from a real merchant, turns the fulfilled
-payment into a Solana receipt passport, and uses that receipt history to unlock
-purpose-bound credit.
+Jiagon lets you say "I want coffee"; your personal agent buys from a real
+merchant, stores the verified Solana receipt, and uses that receipt history to
+unlock future purpose-bound dining credit.
 ```
 
 Show the product in this order:
 
 ```text
 1. /agent-order
-   Choose Crypto Pay on Solana and call the API.
-   The point: this is an agent calling commerce infrastructure, not a user
-   filling out a checkout form.
+   Use the default "I want coffee" prompt and choose Crypto Pay on Solana.
+   The point: the user gives intent; the agent calls commerce infrastructure.
 
 2. Payment
    Use Helio Solana checkout when HELIO_PAYLINK_ID is configured.
@@ -172,10 +176,10 @@ Show the product in this order:
    purpose, not open-ended cash borrowing.
 ```
 
-The personal agent API is the cleanest agentic order surface. Telegram remains
-the customer/staff pilot surface. NFC is optional for the payment-backed future,
+The personal agent API is the product surface. Telegram remains the lightweight
+merchant terminal for the pilot. NFC is optional for the payment-backed future,
 but useful onsite as a physical presence and receipt-claim surface. The backend
-primitive is order intent plus merchant-issued receipt.
+primitive is agent order intent plus merchant-issued receipt.
 
 ## Onsite Raposa Plan
 

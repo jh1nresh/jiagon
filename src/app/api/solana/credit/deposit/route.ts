@@ -1,5 +1,6 @@
 import { bearerTokenFromRequest, verifyPrivyAccessToken } from "@/server/privyAuth";
 import {
+  getMerchantReceiptCreditProfile,
   releaseMerchantReceiptCreditReservation,
   reserveMerchantReceiptCreditAtomic,
 } from "@/server/receiptStore";
@@ -55,6 +56,28 @@ function amountCents(value: unknown) {
 
 function cleanText(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, 100) : fallback;
+}
+
+async function authoritativeCreditProfile(input: {
+  userId: string;
+  amountCents: number;
+  fallback: {
+    unlockedCreditCents: number;
+    mintedReceiptCount: number;
+    receiptIds: string[];
+  };
+  reservations: Array<{ receiptId: string; amountCents: number }>;
+}) {
+  const refreshed = await getMerchantReceiptCreditProfile(input.userId);
+  if (!refreshed.error && refreshed.configured) return { ...refreshed, possiblyStale: false };
+
+  console.warn("Jiagon could not refresh credit profile after devnet draw reservation.", {
+    userId: input.userId,
+    amountCents: input.amountCents,
+    reservations: input.reservations,
+    error: refreshed.error,
+  });
+  return { ...input.fallback, possiblyStale: true };
 }
 
 export async function GET() {
@@ -169,17 +192,25 @@ export async function POST(request: Request) {
         }
         throw error;
       }
-      const creditProfile = reservation.creditProfile || {
-        unlockedCreditCents: Math.max(0, reservation.unlockedCreditCents - cents),
-        mintedReceiptCount: reservation.mintedReceiptCount,
-        receiptIds: reservation.receiptIds,
-      };
+      const creditProfile = reservation.creditProfile
+        ? { ...reservation.creditProfile, possiblyStale: false }
+        : await authoritativeCreditProfile({
+            userId: claims.userId,
+            amountCents: cents,
+            reservations: reservation.reservations,
+            fallback: {
+              unlockedCreditCents: Math.max(0, reservation.unlockedCreditCents - cents),
+              mintedReceiptCount: reservation.mintedReceiptCount,
+              receiptIds: reservation.receiptIds,
+            },
+          });
       return Response.json({
         ...result,
         creditProfile: {
           unlockedCreditUsd: (creditProfile.unlockedCreditCents / 100).toFixed(2),
           mintedReceiptCount: creditProfile.mintedReceiptCount,
           receiptIds: creditProfile.receiptIds,
+          possiblyStale: creditProfile.possiblyStale,
         },
       });
     }

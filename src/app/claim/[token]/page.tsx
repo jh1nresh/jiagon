@@ -57,10 +57,18 @@ const privyConfig: PrivyClientConfig = {
   loginMethods: ["wallet", "email", "google"],
   appearance: {
     theme: "light" as const,
-    accentColor: "#A9573D" as const,
-    showWalletLoginFirst: true,
-    walletChainType: "solana-only" as const,
-          walletList: ["phantom", "solflare", "backpack", "jupiter", "detected_solana_wallets", "wallet_connect_qr_solana"],
+          accentColor: "#A9573D" as const,
+          showWalletLoginFirst: true,
+          walletChainType: "solana-only" as const,
+          // The final two entries are desktop fallbacks; mobile uses the native app path.
+          walletList: [
+            "phantom",
+            "solflare",
+            "backpack",
+            "jupiter",
+            "detected_solana_wallets",
+            "wallet_connect_qr_solana",
+          ],
   },
   embeddedWallets: {
     solana: { createOnLogin: "off" as const },

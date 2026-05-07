@@ -4,9 +4,9 @@ Agentic POS and onchain receipt passport for real-world purchases.
 
 Jiagon turns a merchant-completed order into a customer-claimed receipt that can
 be minted as a Solana receipt credential and used for purpose-bound credit. The
-current MVP starts with a coffee-shop flow: a user's personal agent orders from
-Raposa Coffee through Jiagon, staff taps `Paid + Done`, and the customer claims
-the fulfilled receipt into a Jiagon Passport.
+current MVP starts with a coffee-shop flow: a user says they want coffee, their
+personal agent orders from Raposa Coffee through Jiagon, prepares payment
+approval, tracks pickup, and the fulfilled receipt lands in Jiagon Passport.
 
 Live app: [jiagon.vercel.app](https://jiagon.vercel.app)
 
@@ -29,7 +29,9 @@ flow.
 ## Product Flow
 
 ```txt
-Personal agent order API
+User says "I want coffee"
+-> Personal agent order API
+-> Solana payment approval or counter fallback
 -> Merchant queue
 -> Staff taps Paid + Done
 -> Jiagon issues a claimable receipt
@@ -56,7 +58,7 @@ Primary app surfaces:
 - Web app: Next.js App Router.
 - Mobile app: Expo Android under `apps/mobile`.
 - Auth: Privy on web and Privy Expo on mobile.
-- Order entry: personal agent API, Telegram bot, and `/tile/{merchant}` fallback.
+- Order entry: personal agent API first, with Telegram bot and `/tile/{merchant}` fallback.
 - Pilot merchant: Raposa Coffee.
 - Receipt pickup: static NFC station plus pickup code.
 - Receipt credential: Solana Bubblegum cNFT when Bubblegum env is configured;
@@ -117,10 +119,12 @@ Create a merchant order from a personal agent:
 POST /api/agent/orders
 ```
 
-The response returns an order pass, pickup code, pickup estimate, merchant
-dispatch status, and optional Crypto Pay on Solana test request. Supported demo
-payment modes are `crypto_pay` and `pay_at_counter`. Legacy `helio_pay` and
-`solana_pay` aliases are accepted as `crypto_pay`.
+The request can be as loose as "I want a coffee" or structured with menu items.
+The response returns the user's pickup result, the actions the agent handled,
+an order pass, pickup code, pickup estimate, merchant dispatch status, and
+optional Crypto Pay on Solana test request. Supported demo payment modes are
+`crypto_pay` and `pay_at_counter`. Legacy `helio_pay` and `solana_pay` aliases
+are accepted as `crypto_pay`.
 
 Browser demo:
 
@@ -165,11 +169,12 @@ Private receipt passport data is not returned by public agent APIs.
 ## Demo Flow
 
 ```txt
-User asks personal agent to order one iced latte
+User tells personal agent: I want a coffee, under $10
 -> agent calls /api/agent/orders
--> Jiagon returns pickup code, ETA, and optional Crypto Pay on Solana request
+-> Jiagon selects Raposa, creates the order, and prepares payment approval
+-> Jiagon returns pickup location, pickup code, ETA, and optional Crypto Pay request
 -> merchant Telegram group or /merchant receives the order
--> customer pays through Crypto Pay if configured, otherwise at the counter
+-> user approves Crypto Pay if configured, otherwise counter payment is fallback
 -> staff taps Paid + Done
 -> Jiagon issues a receipt claim token
 -> customer taps NFC station

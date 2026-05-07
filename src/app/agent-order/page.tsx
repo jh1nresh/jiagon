@@ -35,6 +35,15 @@ type AgentOrderResponse = {
     verifiedPayment?: boolean;
     nextUpgrade?: string;
   };
+  agentExecution?: {
+    userSaid?: string;
+    agentHandled?: string[];
+    userVisibleResult?: string[];
+    paymentApproval?: string;
+    merchantTerminal?: string;
+    receiptAutomation?: string;
+    futureCreditUse?: string;
+  };
   creditPath?: string[];
   staffDispatch?: string;
   customerInstructions?: string[];
@@ -85,7 +94,7 @@ function paymentStatusCopy(payment?: AgentOrderResponse["payment"]) {
 
 export default function AgentOrderDemoPage() {
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("crypto_pay");
-  const [userIntent, setUserIntent] = useState("Order one iced latte at Raposa Coffee");
+  const [userIntent, setUserIntent] = useState("I want a coffee. Keep it under $10 and use crypto pay if possible.");
   const [maxSpendUsd, setMaxSpendUsd] = useState("10.00");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AgentOrderResponse | null>(null);
@@ -278,6 +287,37 @@ export default function AgentOrderDemoPage() {
           overflow: auto;
           white-space: pre-wrap;
         }
+        .agent-order-script {
+          margin-top: 16px;
+          display: grid;
+          gap: 8px;
+        }
+        .agent-order-bubble {
+          max-width: 92%;
+          padding: 12px 14px;
+          border-radius: 8px;
+          border: .5px solid var(--rule);
+          background: var(--surface);
+          color: var(--ink);
+          line-height: 1.45;
+        }
+        .agent-order-bubble.agent {
+          margin-left: auto;
+          background: var(--verified);
+          border-color: var(--verified);
+          color: var(--panel-text);
+        }
+        .agent-order-handoff {
+          display: grid;
+          grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+          gap: 10px;
+        }
+        .agent-order-handoff-panel {
+          padding: 14px;
+          border-radius: 8px;
+          border: .5px solid var(--rule);
+          background: var(--surface);
+        }
         .agent-order-result { display: grid; gap: 14px; }
         .agent-order-summary {
           display: grid;
@@ -378,6 +418,7 @@ export default function AgentOrderDemoPage() {
           .agent-order-hero { display: block; }
           .agent-order-nav { margin-top: 18px; }
           .agent-order-card + .agent-order-card { margin-top: 18px; }
+          .agent-order-handoff,
           .agent-order-summary,
           .agent-order-mode-grid { grid-template-columns: 1fr; }
         }
@@ -389,7 +430,7 @@ export default function AgentOrderDemoPage() {
             <div className="agent-order-mark">J</div>
             <div>
               <div className="agent-order-wordmark">Jiagon</div>
-              <div className="agent-order-sub">Agent order demo</div>
+              <div className="agent-order-sub">Agentic POS demo</div>
             </div>
           </div>
           <nav className="agent-order-nav" aria-label="Agent order demo">
@@ -403,17 +444,23 @@ export default function AgentOrderDemoPage() {
 
         <section className="agent-order-hero">
           <div className="agent-order-card">
-            <div className="agent-order-kicker">Personal agent API call</div>
-            <h1 className="agent-order-title">Order coffee through an agent.</h1>
+            <div className="agent-order-kicker">User intent &rarr; agent-run checkout</div>
+            <h1 className="agent-order-title">Say coffee. Let the agent handle the POS.</h1>
             <p className="agent-order-copy">
-              This page calls the same API a Seeker-style personal agent would call.
-              Jiagon creates the Raposa order pass, returns a Solana payment route,
-              and sends the order into the merchant queue.
+              This is the flow to demo: the user only states intent. A personal agent
+              calls Jiagon, creates the Raposa order, prepares payment approval, tracks
+              pickup, and stores the receipt for future dining credit.
             </p>
+            <div className="agent-order-script" aria-label="Agentic POS conversation">
+              <div className="agent-order-bubble">I want a coffee. Keep it under $10.</div>
+              <div className="agent-order-bubble agent">
+                I found Raposa Coffee, prepared payment, and will tell you where to pick it up.
+              </div>
+            </div>
 
             <div className="agent-order-form">
               <div className="agent-order-field">
-                <label htmlFor="agent-intent">Agent instruction</label>
+                <label htmlFor="agent-intent">User tells their agent</label>
                 <textarea
                   id="agent-intent"
                   value={userIntent}
@@ -450,7 +497,7 @@ export default function AgentOrderDemoPage() {
               </div>
 
               <button className="agent-order-primary" type="button" disabled={busy} onClick={createOrder}>
-                {busy ? "Agent is placing order..." : "Call Agent Ordering API"}
+                {busy ? "Agent is handling order..." : "Let agent order coffee"}
               </button>
 
               <pre className="agent-order-code">{JSON.stringify(requestBody, null, 2)}</pre>
@@ -459,14 +506,14 @@ export default function AgentOrderDemoPage() {
 
           <div className="agent-order-card agent-order-result">
             <div>
-              <div className="agent-order-kicker">Order pass response</div>
+              <div className="agent-order-kicker">Agent result</div>
               {error && <div className="agent-order-error">{error}</div>}
             </div>
 
             {!result && !error && (
               <div className="agent-order-empty">
-                Click the API button to create a Raposa order pass. The response will show
-                pickup code, payment route, staff dispatch, and NFC claim path.
+                Start the agent run to see what the user receives: pickup location,
+                approval step, ready time, receipt claim path, and future credit use.
               </div>
             )}
 
@@ -534,6 +581,30 @@ export default function AgentOrderDemoPage() {
                     </p>
                   )}
                 </section>
+
+                {result.agentExecution && (
+                  <section className="agent-order-handoff">
+                    <div className="agent-order-handoff-panel">
+                      <div className="agent-order-label">What the user sees</div>
+                      <ul className="agent-order-list">
+                        {(result.agentExecution.userVisibleResult || []).map((item, index) => (
+                          <li key={`visible-${index}-${item}`}>{item}</li>
+                        ))}
+                      </ul>
+                      {result.agentExecution.paymentApproval && (
+                        <p className="agent-order-copy">{result.agentExecution.paymentApproval}</p>
+                      )}
+                    </div>
+                    <div className="agent-order-handoff-panel">
+                      <div className="agent-order-label">What the agent handled</div>
+                      <ul className="agent-order-list">
+                        {(result.agentExecution.agentHandled || []).map((item, index) => (
+                          <li key={`handled-${index}-${item}`}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </section>
+                )}
 
                 <section>
                   <div className="agent-order-label">Receipt to credit path</div>

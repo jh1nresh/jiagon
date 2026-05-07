@@ -144,8 +144,10 @@ function quantityFrom(value: unknown) {
 
 function quantityFromIntent(intent: string) {
   const lower = ` ${intent.toLowerCase()} `;
-  const digitMatch = /\b([1-9]|1\d|20)\b/.exec(lower);
-  if (digitMatch) return quantityFrom(digitMatch[1]);
+  const unitMatch = /\b([1-9]|1\d|20)\s*(x|pcs?|pieces?|cups?|杯|份)\b|\b(x|qty|quantity)\s*([1-9]|1\d|20)\b/.exec(lower);
+  if (unitMatch) return quantityFrom(unitMatch[1] || unitMatch[4]);
+  const leadingDigitMatch = /^\s*([1-9]|1\d|20)\b/.exec(lower);
+  if (leadingDigitMatch) return quantityFrom(leadingDigitMatch[1]);
   if (/\b(two|couple)\b/.test(lower)) return 2;
   if (/\b(three)\b/.test(lower)) return 3;
   return 1;
@@ -164,14 +166,29 @@ function menuItemFromStructuredItem(merchant: MerchantProfile, item: Record<stri
 
 function menuItemFromIntent(merchant: MerchantProfile, intent: string) {
   const lower = intent.toLowerCase();
-  return merchant.menu.find((item) => {
+  const normalized = ` ${lower.replace(/[_-]/g, " ").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim()} `;
+  const directMatch = merchant.menu.find((item) => {
     const name = item.name.toLowerCase();
     const normalizedId = item.id.replace(/-/g, " ");
     const significantTerms = name.split(/\s+/).filter((term) => term.length > 4);
     return lower.includes(name) ||
       lower.includes(normalizedId) ||
       significantTerms.some((term) => lower.includes(term));
-  }) || null;
+  });
+  if (directMatch) return directMatch;
+
+  if (merchant.id === "raposa-coffee") {
+    const wantsLatte = normalized.includes(" latte ") || normalized.includes(" 拿鐵 ") || normalized.includes(" 牛奶 ");
+    const wantsEspresso = normalized.includes(" espresso ") || normalized.includes("濃縮");
+    const wantsPastry = normalized.includes(" croissant ") || normalized.includes(" pastry ") || normalized.includes(" 可頌 ");
+    const wantsCoffee = normalized.includes(" coffee ") || normalized.includes(" cafe ") || normalized.includes(" 咖啡 ");
+    if (wantsLatte) return merchant.menu.find((item) => item.id === "iced-latte") || null;
+    if (wantsEspresso) return merchant.menu.find((item) => item.id === "espresso") || null;
+    if (wantsPastry) return merchant.menu.find((item) => item.id === "croissant") || null;
+    if (wantsCoffee) return merchant.menu.find((item) => item.id === "iced-latte") || merchant.menu[0] || null;
+  }
+
+  return null;
 }
 
 function itemForMenuItem(menuItem: MenuItem, quantity: number): MerchantOrderItem | null {
@@ -453,6 +470,40 @@ function paymentIntent(input: {
   };
 }
 
+function agentExecutionPlan(input: {
+  merchant: MerchantProfile;
+  order: ReturnType<typeof publicMerchantOrder>;
+  pickup: ReturnType<typeof pickupEstimate>;
+  payment: ReturnType<typeof paymentIntent>;
+}) {
+  const paymentApproval = input.payment.mode === "crypto_pay" && (
+    input.payment.status === "checkout_config_created" ||
+    input.payment.status === "payment_request_created"
+  )
+    ? "User approves the Solana payment intent; agent continues tracking pickup."
+    : "Payment is external in this pilot; agent still tracks the order pass and receipt state.";
+
+  return {
+    userSaid: "I want coffee.",
+    agentHandled: [
+      `Selected ${input.merchant.name} and matched the menu item.`,
+      "Created the order pass through Jiagon Agentic POS.",
+      "Prepared payment route and user approval step.",
+      "Sent the order into the merchant terminal.",
+      "Prepared NFC receipt claim and credit unlock path.",
+    ],
+    userVisibleResult: [
+      `Pickup at ${input.merchant.name}.`,
+      `Order Pass ${input.order.pickupCode}.`,
+      `Ready in ${input.pickup.label}.`,
+    ],
+    paymentApproval,
+    merchantTerminal: "Telegram is the lightweight merchant terminal; the product surface is the agent-callable POS API.",
+    receiptAutomation: "After merchant Paid + Done, Jiagon turns the fulfilled order into a claimable receipt passport record.",
+    futureCreditUse: "The collected receipt history can later unlock purpose-bound fine-dining deposit credit.",
+  };
+}
+
 export async function POST(request: Request) {
   if (!request.headers.get("content-type")?.toLowerCase().includes("application/json")) {
     return Response.json({ error: "Agent order intake requires a JSON request." }, { status: 415 });
@@ -591,6 +642,7 @@ export async function POST(request: Request) {
     pickupCode: order.pickupCode,
     amountUsd: order.subtotalUsd,
   });
+  const agentExecution = agentExecutionPlan({ merchant, order, pickup, payment });
 
   return Response.json(
     {
@@ -618,6 +670,7 @@ export async function POST(request: Request) {
       order,
       pickup,
       payment,
+      agentExecution,
       paymentProof: {
         rail: payment.mode === "crypto_pay" ? "solana" : "external_pos",
         currentLevel: payment.mode === "crypto_pay" && (
@@ -647,12 +700,12 @@ export async function POST(request: Request) {
         "Credit page unlocks purpose-bound restaurant deposit credit",
       ],
       customerInstructions: [
-        `Show Order Pass ${order.pickupCode} at ${merchant.name}.`,
+        `Pickup at ${merchant.name} with Order Pass ${order.pickupCode}.`,
         payment.mode === "crypto_pay" && payment.status === "payment_request_created"
-          ? "Open the Solana Pay request, then show the paid order pass at pickup."
+          ? "Approve the Solana Pay request; Jiagon keeps the order pass tied to pickup and receipt claim."
           : payment.mode === "crypto_pay" && payment.status === "checkout_config_created"
-            ? "Open the Helio Solana test checkout, then show the paid order pass at pickup."
-          : "Pay at the counter as usual.",
+            ? "Approve the Helio Solana test checkout; Jiagon keeps the order pass tied to pickup and receipt claim."
+          : "Counter payment is the pilot fallback; the agent still tracks pickup and receipt claim.",
         `Pickup target: ${pickup.label}.`,
         "After staff taps Paid + Done, tap the NFC receipt station to claim the onchain receipt into Jiagon Passport.",
       ],
