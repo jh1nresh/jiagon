@@ -57,8 +57,10 @@ function sameOrigin(request: Request) {
   }
 }
 
-function verifiedNativeClient(request: Request) {
-  return request.headers.get("x-jiagon-client")?.toLowerCase() === "mobile" && !request.headers.get("origin");
+function verifiedNativeClient(request: Request, claims: Awaited<ReturnType<typeof verifiedClaims>>) {
+  return Boolean(claims.userId) &&
+    request.headers.get("x-jiagon-client")?.toLowerCase() === "mobile" &&
+    !request.headers.get("origin");
 }
 
 async function verifiedClaims(request: Request) {
@@ -114,7 +116,7 @@ export async function POST(request: Request) {
     return authError(error);
   }
 
-  if (!isTrustedLocalDemo(request) && !sameOrigin(request) && !verifiedNativeClient(request)) {
+  if (!isTrustedLocalDemo(request) && !sameOrigin(request) && !verifiedNativeClient(request, claims)) {
     return Response.json(
       { error: "Merchant receipt mint must be requested from the Jiagon app origin or an authenticated Jiagon mobile client." },
       { status: 403 },

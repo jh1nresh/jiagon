@@ -65,6 +65,11 @@ export async function GET(request: Request) {
   if (!configuredOrigin()) telegramMissing.push("JIAGON_APP_ORIGIN or NEXT_PUBLIC_APP_URL");
 
   const creditMissing = missing(CREDIT_REQUIRED_ENV);
+  const helioConfigured = configured(process.env.HELIO_PAYLINK_ID);
+  const solanaPayConfigured = configured(process.env.JIAGON_SOLANA_PAY_RECIPIENT);
+  const cryptoPayMissing = helioConfigured || solanaPayConfigured ? [] : ["HELIO_PAYLINK_ID or JIAGON_SOLANA_PAY_RECIPIENT"];
+  const helioNetwork = (process.env.HELIO_NETWORK || process.env.NEXT_PUBLIC_HELIO_NETWORK || "test").trim().toLowerCase();
+  const helioBlocked = helioConfigured && helioNetwork === "main";
   const checks: DemoReadinessCheck[] = [
     {
       id: "telegram",
@@ -94,6 +99,28 @@ export async function GET(request: Request) {
       mode: credit.configured && credit.enabled ? "draw-repay ready" : credit.enabled ? "setup required" : "disabled",
       missingCount: creditMissing.length,
       detail: "Credit page can send real devnet draw and repay transactions.",
+    },
+    {
+      id: "helio-pay",
+      label: "Crypto Pay on Solana",
+      status: readinessStatus(cryptoPayMissing.length === 0, helioBlocked),
+      configured: cryptoPayMissing.length === 0,
+      enabled: cryptoPayMissing.length === 0 && !helioBlocked,
+      mode: helioBlocked
+        ? "mainnet blocked"
+        : helioConfigured
+          ? "Helio Solana checkout ready"
+          : solanaPayConfigured
+            ? "direct Solana Pay ready"
+            : "optional setup",
+      missingCount: cryptoPayMissing.length,
+      detail: "Agent orders can return one Crypto Pay on Solana request: Helio checkout first, direct Solana Pay fallback. Receipt issuance still requires staff Paid + Done until webhook verification is added.",
+      diagnostics: [
+        {
+          label: "network",
+          value: helioNetwork === "main" ? "blocked-main" : "test",
+        },
+      ],
     },
   ];
   const readyCount = checks.filter((check) => check.status === "ready").length;

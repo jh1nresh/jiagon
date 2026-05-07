@@ -4,24 +4,55 @@ import {
   normalizeSolayerProofInput,
   type SolayerProofInput,
 } from "@/lib/solayerProof";
+import { isSolanaPubkey } from "@/lib/solanaCredit";
 import {
   sha256Hex,
   signSolayerProofAdapter,
   solayerProofSigningSecret,
 } from "@/server/solayerProofSigner";
-import { recoverMessageAddress, type Hex } from "viem";
+import bs58 from "bs58";
+import nacl from "tweetnacl";
 
 export const runtime = "nodejs";
 
-function cleanAddress(value: unknown) {
+function cleanSolanaOwner(value: unknown) {
   if (typeof value !== "string") return null;
-  const address = value.trim().toLowerCase();
-  return /^0x[a-f0-9]{40}$/.test(address) ? address : null;
+  const owner = value.trim();
+  return isSolanaPubkey(owner) ? owner : null;
 }
 
-function cleanSignature(value: unknown): Hex | null {
+function decodeSignature(value: unknown) {
   if (typeof value !== "string") return null;
-  return /^0x[a-fA-F0-9]{130}$/.test(value.trim()) ? value.trim() as Hex : null;
+  const signature = value.trim();
+  const looksBase64 = /[+/=]/.test(signature);
+  try {
+    if (!looksBase64) {
+      const decoded = bs58.decode(signature);
+      if (decoded.length === 64) return decoded;
+    }
+  } catch {
+    // Fall through to base64 decoding.
+  }
+  const decoded = Buffer.from(signature, "base64");
+  return decoded.length === 64 ? new Uint8Array(decoded) : null;
+}
+
+function verifySolanaMessageSignature(input: {
+  signer: string;
+  message: string;
+  signature: Uint8Array;
+}) {
+  try {
+    const publicKey = bs58.decode(input.signer);
+    if (publicKey.length !== 32) return false;
+    return nacl.sign.detached.verify(
+      new TextEncoder().encode(input.message),
+      input.signature,
+      publicKey,
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(request: Request) {
@@ -49,9 +80,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const wallet = cleanAddress(body.wallet);
-    const signer = cleanAddress(body.ownership?.signer);
-    const signature = cleanSignature(body.ownership?.signature);
+    const wallet = cleanSolanaOwner(body.wallet);
+    const signer = cleanSolanaOwner(body.ownership?.signer);
+    const signature = decodeSignature(body.ownership?.signature);
     const signingSecret = solayerProofSigningSecret();
 
     if (!wallet || !signer || wallet !== signer) {
@@ -71,17 +102,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "Solayer account and position amount are required." }, { status: 400 });
     }
 
-    let recovered: string;
-    try {
-      recovered = await recoverMessageAddress({
-        message: buildSolayerProofMessage({ wallet, proof: body.proof || {} }),
-        signature,
-      });
-    } catch {
-      return Response.json({ error: "Solayer proof signature is malformed." }, { status: 400 });
-    }
-
-    if (recovered.toLowerCase() !== wallet) {
+    const message = buildSolayerProofMessage({ wallet, proof: body.proof || {} });
+    if (!verifySolanaMessageSignature({ signer, message, signature })) {
       return Response.json({ error: "Solayer proof ownership verification failed." }, { status: 403 });
     }
 

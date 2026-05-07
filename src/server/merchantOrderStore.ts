@@ -21,7 +21,7 @@ export type MerchantOrder = {
   merchantName: string;
   location: string | null;
   customerLabel: string | null;
-  source: "tile" | "telegram" | "web";
+  source: "tile" | "telegram" | "web" | "agent";
   status: MerchantOrderStatus;
   items: MerchantOrderItem[];
   subtotalCents: number;
@@ -46,7 +46,7 @@ export type MerchantOrderCreateInput = {
   merchantName: string;
   location?: string | null;
   customerLabel?: string | null;
-  source?: "tile" | "telegram" | "web" | null;
+  source?: "tile" | "telegram" | "web" | "agent" | null;
   items: MerchantOrderItem[];
   notes?: string | null;
 };
@@ -294,7 +294,7 @@ function mapMerchantOrderRow(row: Record<string, unknown>): MerchantOrder {
     merchantName: String(row.merchant_name),
     location: typeof row.location === "string" ? row.location : null,
     customerLabel: typeof row.customer_label === "string" ? row.customer_label : null,
-    source: row.source === "telegram" || row.source === "web" ? row.source : "tile",
+    source: row.source === "telegram" || row.source === "web" || row.source === "agent" ? row.source : "tile",
     status,
     items: items as MerchantOrderItem[],
     subtotalCents: Number(row.subtotal_cents),

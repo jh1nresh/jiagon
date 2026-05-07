@@ -2,9 +2,7 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey as SolanaPublicKey } f
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { mintV2, mplBubblegum, parseLeafFromMintV2Transaction, type MetadataArgsV2Args } from "@metaplex-foundation/mpl-bubblegum";
 import { base58, keypairIdentity, none, publicKey, some, type OptionOrNullable, type PublicKey } from "@metaplex-foundation/umi";
-
-const DEFAULT_SOLANA_CLUSTER = "devnet";
-const DEFAULT_SOLANA_RPC_URL = "https://api.devnet.solana.com";
+import { solanaTestnetConfigFromEnv, solscanClusterParam } from "@/lib/solanaNetwork";
 
 function configuredSecret(value: string | undefined) {
   const secret = (value || "").trim();
@@ -34,10 +32,6 @@ function parseSecretKey(value: string) {
   return base58.serialize(trimmed);
 }
 
-function clusterParam(cluster: string) {
-  return cluster === "mainnet-beta" ? "" : `?cluster=${encodeURIComponent(cluster)}`;
-}
-
 function shortKey(value: string | null | undefined) {
   if (!value) return "missing";
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
@@ -56,8 +50,7 @@ function solAmount(lamports: number) {
 }
 
 export function solanaBubblegumConfig() {
-  const cluster = process.env.SOLANA_CLUSTER || DEFAULT_SOLANA_CLUSTER;
-  const rpcUrl = process.env.SOLANA_RPC_URL || DEFAULT_SOLANA_RPC_URL;
+  const { cluster, rpcUrl } = solanaTestnetConfigFromEnv();
   const merkleTree = configuredSecret(process.env.SOLANA_BUBBLEGUM_TREE);
   const minterSecret = configuredSecret(process.env.SOLANA_BUBBLEGUM_MINTER_SECRET_KEY);
   const collection = configuredSecret(process.env.SOLANA_BUBBLEGUM_COLLECTION);
@@ -73,7 +66,22 @@ export function solanaBubblegumConfig() {
 }
 
 export async function solanaBubblegumReadinessSmoke() {
-  const config = solanaBubblegumConfig();
+  let config: ReturnType<typeof solanaBubblegumConfig>;
+  try {
+    config = solanaBubblegumConfig();
+  } catch (error) {
+    return {
+      status: "blocked" as const,
+      configured: false,
+      mode: "testnet guard blocked",
+      missing: [],
+      diagnostics: [
+        { label: "cluster", value: process.env.SOLANA_CLUSTER || "devnet" },
+        { label: "rpc", value: rpcHost(process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com") },
+      ],
+      detail: error instanceof Error ? error.message : "Solana testnet guard blocked this configuration.",
+    };
+  }
   const minterSecret = configuredSecret(process.env.SOLANA_BUBBLEGUM_MINTER_SECRET_KEY);
   const missing = [
     ...(config.merkleTree ? [] : ["SOLANA_BUBBLEGUM_TREE"]),
@@ -146,14 +154,14 @@ export async function solanaBubblegumReadinessSmoke() {
         mode: "minter unfunded",
         missing: [],
         diagnostics: smokeDiagnostics,
-        detail: "Bubblegum minter has no SOL for devnet mint fees.",
+        detail: `Bubblegum minter has no SOL for ${config.cluster} mint fees.`,
       };
     }
 
     return {
       status: "ready" as const,
       configured: true,
-      mode: "devnet smoke passed",
+      mode: `${config.cluster} smoke passed`,
       missing: [],
       diagnostics: smokeDiagnostics,
       detail: "Bubblegum RPC, tree account, and minter funding are ready for a real receipt mint.",
@@ -225,8 +233,8 @@ export async function mintJiagonBubblegumReceipt({
     assetId,
     leafNonce: Number(leaf.nonce),
     credentialTx: signatureText,
-    explorerUrl: `https://solscan.io/tx/${signatureText}${clusterParam(config.cluster)}`,
-    assetExplorerUrl: `https://solscan.io/token/${assetId}${clusterParam(config.cluster)}`,
+    explorerUrl: `https://solscan.io/tx/${signatureText}${solscanClusterParam(config.cluster)}`,
+    assetExplorerUrl: `https://solscan.io/token/${assetId}${solscanClusterParam(config.cluster)}`,
     sourceReceiptHash,
     dataHash,
     storageUri: metadataUri,

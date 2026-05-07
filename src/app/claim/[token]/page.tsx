@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { PrivyProvider, usePrivy, type PrivyClientConfig } from "@privy-io/react-auth";
+import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 
 type ClaimReceipt = {
   id: string;
@@ -58,13 +59,15 @@ const privyConfig: PrivyClientConfig = {
     theme: "light" as const,
     accentColor: "#A9573D" as const,
     showWalletLoginFirst: true,
-    walletChainType: "ethereum-only" as const,
-    walletList: ["detected_ethereum_wallets", "metamask", "coinbase_wallet", "base_account", "okx_wallet", "wallet_connect"],
+    walletChainType: "solana-only" as const,
+          walletList: ["phantom", "solflare", "backpack", "jupiter", "detected_solana_wallets", "wallet_connect_qr_solana"],
   },
   embeddedWallets: {
-    ethereum: { createOnLogin: "off" as const },
     solana: { createOnLogin: "off" as const },
     showWalletUIs: false,
+  },
+  externalWallets: {
+    solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) },
   },
 };
 

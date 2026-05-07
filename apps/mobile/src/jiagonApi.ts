@@ -66,6 +66,9 @@ async function readJson<T>(response: Response): Promise<T> {
         : `Jiagon API request failed with ${response.status}.`;
     throw new Error(message);
   }
+  if (payload === null || payload === undefined) {
+    throw new Error("Invalid or empty JSON response from Jiagon API.");
+  }
   return payload as T;
 }
 

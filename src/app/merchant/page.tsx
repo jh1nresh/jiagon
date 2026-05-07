@@ -47,7 +47,7 @@ type MerchantOrder = {
   merchantName: string;
   location: string | null;
   customerLabel: string | null;
-  source: "tile" | "telegram" | "web";
+  source: "tile" | "telegram" | "web" | "agent";
   status: MerchantOrderStatus;
   items: MerchantOrderItem[];
   subtotalCents: number;
@@ -191,6 +191,7 @@ export default function MerchantPage() {
   }, [busy, form.amountUsd, form.merchantName]);
   const merchantSetup = useMemo(() => {
     const merchantId = form.merchantId.trim() || "merchant";
+    const origin = typeof window === "undefined" ? "" : window.location.origin;
     const profile = new URLSearchParams({
       merchantName: form.merchantName.trim() || defaultMerchant.merchantName,
       location: form.location.trim() || defaultMerchant.location,
@@ -207,9 +208,9 @@ export default function MerchantPage() {
 
     return {
       merchantId,
-      dashboardUrl: `/merchant?${dashboard.toString()}`,
-      customerTileUrl: `/tile/${encodeURIComponent(merchantId)}?${profile.toString()}`,
-      nfcStationUrl: `/tile/${encodeURIComponent(merchantId)}?nfc=1&${profile.toString()}`,
+      dashboardUrl: `${origin}/merchant?${dashboard.toString()}`,
+      customerTileUrl: `${origin}/tile/${encodeURIComponent(merchantId)}?${profile.toString()}`,
+      nfcStationUrl: `${origin}/tile/${encodeURIComponent(merchantId)}?nfc=1&${profile.toString()}`,
     };
   }, [form.category, form.location, form.merchantId, form.merchantName, form.purpose]);
 
@@ -625,8 +626,8 @@ export default function MerchantPage() {
                 <code>{check.mode}</code>
                 {check.diagnostics?.length ? (
                   <ul>
-                    {check.diagnostics.map((item) => (
-                      <li key={`${check.id}-${item.label}`}>
+                    {check.diagnostics.map((item, index) => (
+                      <li key={`${check.id}-${index}`}>
                         {item.label}: {item.value}
                       </li>
                     ))}
@@ -784,6 +785,7 @@ export default function MerchantPage() {
                       <div>
                         <span className={`merchant-status ${order.status}`}>{statusLabel(order.status)}</span>
                         <span className="merchant-pickup-code">#{order.pickupCode}</span>
+                        <span className="merchant-pickup-code">{order.source}</span>
                         <strong>{order.customerLabel || "Walk-in customer"}</strong>
                       </div>
                       <p>{orderLineItems(order.items)}</p>

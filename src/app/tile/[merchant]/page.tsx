@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { fallbackMenu, merchantProfileForId } from "@/lib/merchantCatalog";
 
@@ -178,7 +178,7 @@ export default function TilePage() {
     setClaimMessage("Ready for another Order Pass.");
   }
 
-  async function lookupReceiptClaimByCode(code: string, options: { auto?: boolean } = {}) {
+  const lookupReceiptClaimByCode = useCallback(async (code: string, options: { auto?: boolean } = {}) => {
     const cleanedCode = cleanReceiptPass(code);
     if (!cleanedCode) {
       setClaimMessage("Enter your Order Pass from Telegram.");
@@ -219,14 +219,13 @@ export default function TilePage() {
     } finally {
       setClaimBusy(false);
     }
-  }
+  }, [isNfcStation, merchantId]);
 
   useEffect(() => {
     if (!isNfcStation || !pairedPass || autoClaimAttempted) return;
     setAutoClaimAttempted(true);
     void lookupReceiptClaimByCode(pairedPass, { auto: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNfcStation, pairedPass, autoClaimAttempted]);
+  }, [autoClaimAttempted, isNfcStation, lookupReceiptClaimByCode, pairedPass]);
 
   async function lookupReceiptClaim(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

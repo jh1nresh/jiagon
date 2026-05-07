@@ -111,7 +111,7 @@ export type AgentMerchantSignal = {
 };
 
 export type PrivateAccountState = {
-  etherfiSync?: unknown;
+  receiptSync?: unknown;
   solayerProofs?: unknown[];
   publishedReviews?: unknown[];
   reviewedReceiptIds?: string[];
@@ -189,6 +189,19 @@ export type MerchantReceiptClaimResult =
       error: string;
     };
 
+export type MerchantReceiptCreditProfile = {
+  configured: boolean;
+  unlockedCreditCents: number;
+  mintedReceiptCount: number;
+  receiptIds: string[];
+  error?: string;
+};
+
+export type MerchantReceiptCreditReservation = {
+  receiptId: string;
+  amountCents: number;
+};
+
 export type AccountStateRecord = {
   configured: boolean;
   state: PrivateAccountState | null;
@@ -248,7 +261,7 @@ async function ensureSchema(pool: Pool) {
         review_id text not null,
         status text not null,
         mode text,
-        source_chain text not null default 'optimism',
+        source_chain text not null default 'solana',
         source_tx text not null,
         source_block integer,
         log_index integer not null,
@@ -846,6 +859,15 @@ export async function claimMerchantIssuedReceipt(input: {
   }
 }
 
+function unlockedCreditForMint(input: {
+  mintStatus: "prepared" | "minted";
+  creditUnlockedCents?: number;
+}) {
+  return input.mintStatus === "minted"
+    ? Math.max(0, Math.min(2_500, Math.trunc(input.creditUnlockedCents || 0)))
+    : 0;
+}
+
 export async function recordMerchantReceiptCredential(input: {
   receiptId: string;
   privyUserId: string;
@@ -866,13 +888,37 @@ export async function recordMerchantReceiptCredential(input: {
   error?: string;
 }> {
   const pool = getPool();
-  if (!pool) return { configured: false, updated: false };
+  const creditUnlockedCents = unlockedCreditForMint(input);
+  if (!pool) {
+    const memory = merchantReceiptMemory();
+    for (const [tokenHash, receipt] of memory.entries()) {
+      if (
+        receipt.id === input.receiptId &&
+        receipt.claimedBy === input.privyUserId &&
+        receipt.status === "claimed"
+      ) {
+        memory.set(tokenHash, {
+          ...receipt,
+          mintStatus: input.mintStatus,
+          credentialId: input.credentialId || null,
+          credentialChain: input.credentialChain || null,
+          credentialStandard: input.credentialStandard || null,
+          credentialTx: input.credentialTx || null,
+          solanaOwner: input.solanaOwner || null,
+          dataHash: input.dataHash || null,
+          storageUri: input.storageUri || null,
+          explorerUrl: input.explorerUrl || null,
+          assetExplorerUrl: input.assetExplorerUrl || null,
+          creditUnlockedCents,
+        });
+        return { configured: false, updated: true };
+      }
+    }
+    return { configured: false, updated: false };
+  }
 
   try {
     await ensureMerchantReceiptSchema(pool);
-    const creditUnlockedCents = input.mintStatus === "minted"
-      ? Math.max(0, Math.min(2_500, Math.trunc(input.creditUnlockedCents || 0)))
-      : 0;
     const result = await pool.query(
       `
         update jiagon_merchant_receipts
@@ -923,13 +969,195 @@ export async function recordMerchantReceiptCredential(input: {
   }
 }
 
-export async function getMerchantReceiptCreditProfile(privyUserId: string): Promise<{
+export async function reserveMerchantReceiptCreditAtomic(privyUserId: string, amountCents: number): Promise<{
   configured: boolean;
+  reserved: boolean;
   unlockedCreditCents: number;
   mintedReceiptCount: number;
   receiptIds: string[];
+  reservations: MerchantReceiptCreditReservation[];
+  creditProfile?: MerchantReceiptCreditProfile;
   error?: string;
 }> {
+  const pool = getPool();
+  if (!pool) {
+    return {
+      configured: false,
+      reserved: false,
+      unlockedCreditCents: 0,
+      mintedReceiptCount: 0,
+      receiptIds: [],
+      reservations: [],
+    };
+  }
+
+  const requested = Math.max(0, Math.trunc(amountCents));
+  if (requested <= 0) {
+    return {
+      configured: true,
+      reserved: false,
+      unlockedCreditCents: 0,
+      mintedReceiptCount: 0,
+      receiptIds: [],
+      reservations: [],
+      error: "Credit reservation amount must be positive.",
+    };
+  }
+
+  const client = await pool.connect();
+  try {
+    await ensureMerchantReceiptSchema(pool);
+    await client.query("begin");
+    const result = await client.query(
+      `
+        select
+          id,
+          credit_unlocked_cents
+        from jiagon_merchant_receipts
+        where claimed_by = $1
+          and status = 'claimed'
+          and mint_status = 'minted'
+          and credential_id is not null
+          and coalesce(credit_unlocked_cents, 0) > 0
+        order by updated_at desc
+        limit 25
+        for update
+      `,
+      [privyUserId],
+    );
+    const receiptIds = result.rows.map((row) => String(row.id));
+    const total = result.rows.reduce((sum, row) => sum + Math.max(0, Number(row.credit_unlocked_cents) || 0), 0);
+    const unlockedCreditCents = Math.min(2_500, total);
+    if (requested > unlockedCreditCents) {
+      await client.query("rollback");
+      return {
+        configured: true,
+        reserved: false,
+        unlockedCreditCents,
+        mintedReceiptCount: receiptIds.length,
+        receiptIds,
+        reservations: [],
+      };
+    }
+
+    let remaining = requested;
+    const reservations: MerchantReceiptCreditReservation[] = [];
+    for (const row of result.rows) {
+      if (remaining <= 0) break;
+      const receiptId = String(row.id);
+      const available = Math.max(0, Number(row.credit_unlocked_cents) || 0);
+      const debit = Math.min(available, remaining);
+      if (debit <= 0) continue;
+      await client.query(
+        `
+          update jiagon_merchant_receipts
+          set
+            updated_at = now(),
+            credit_unlocked_cents = greatest(0, credit_unlocked_cents - $2)
+          where id = $1
+        `,
+        [receiptId, debit],
+      );
+      reservations.push({ receiptId, amountCents: debit });
+      remaining -= debit;
+    }
+
+    if (remaining > 0) {
+      await client.query("rollback");
+      return {
+        configured: true,
+        reserved: false,
+        unlockedCreditCents,
+        mintedReceiptCount: receiptIds.length,
+        receiptIds,
+        reservations: [],
+      };
+    }
+
+    await client.query("commit");
+    const creditProfile = await getMerchantReceiptCreditProfile(privyUserId);
+    return {
+      configured: true,
+      reserved: true,
+      unlockedCreditCents,
+      mintedReceiptCount: receiptIds.length,
+      receiptIds,
+      reservations,
+      creditProfile,
+    };
+  } catch {
+    try {
+      await client.query("rollback");
+    } catch {
+      // Ignore rollback errors after a failed reservation attempt.
+    }
+    return {
+      configured: true,
+      reserved: false,
+      unlockedCreditCents: 0,
+      mintedReceiptCount: 0,
+      receiptIds: [],
+      reservations: [],
+      error: "Merchant receipt credit reservation failed.",
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function releaseMerchantReceiptCreditReservation(
+  privyUserId: string,
+  reservations: MerchantReceiptCreditReservation[],
+): Promise<{ configured: boolean; released: boolean; error?: string }> {
+  const pool = getPool();
+  if (!pool) return { configured: false, released: false };
+  const cleanReservations = reservations
+    .map((reservation) => ({
+      receiptId: reservation.receiptId,
+      amountCents: Math.max(0, Math.trunc(reservation.amountCents)),
+    }))
+    .filter((reservation) => reservation.receiptId && reservation.amountCents > 0);
+  if (cleanReservations.length === 0) return { configured: true, released: true };
+
+  const client = await pool.connect();
+  try {
+    await ensureMerchantReceiptSchema(pool);
+    await client.query("begin");
+    for (const reservation of cleanReservations) {
+      await client.query(
+        `
+          update jiagon_merchant_receipts
+          set
+            updated_at = now(),
+            credit_unlocked_cents = least(2500, credit_unlocked_cents + $3)
+          where id = $1
+            and claimed_by = $2
+            and status = 'claimed'
+            and mint_status = 'minted'
+            and credential_id is not null
+        `,
+        [reservation.receiptId, privyUserId, reservation.amountCents],
+      );
+    }
+    await client.query("commit");
+    return { configured: true, released: true };
+  } catch {
+    try {
+      await client.query("rollback");
+    } catch {
+      // Ignore rollback errors after a failed release attempt.
+    }
+    return {
+      configured: true,
+      released: false,
+      error: "Merchant receipt credit reservation release failed.",
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function getMerchantReceiptCreditProfile(privyUserId: string): Promise<MerchantReceiptCreditProfile> {
   const pool = getPool();
   if (!pool) {
     return {
@@ -991,7 +1219,7 @@ function cleanPrivateAccountState(value: unknown): PrivateAccountState {
       : {};
 
   return {
-    etherfiSync: input.etherfiSync && typeof input.etherfiSync === "object" ? input.etherfiSync : undefined,
+    receiptSync: input.receiptSync && typeof input.receiptSync === "object" ? input.receiptSync : undefined,
     solayerProofs: Array.isArray(input.solayerProofs) ? input.solayerProofs.slice(0, 25) : [],
     publishedReviews: Array.isArray(input.publishedReviews) ? input.publishedReviews.slice(0, 250) : [],
     reviewedReceiptIds: cleanStringList(input.reviewedReceiptIds),
@@ -1037,7 +1265,7 @@ function mergePrivateAccountState(current: unknown, next: unknown): PrivateAccou
   }
 
   return {
-    etherfiSync: nextState.etherfiSync || currentState.etherfiSync,
+    receiptSync: nextState.receiptSync || currentState.receiptSync,
     solayerProofs: Array.from(
       new Map(
         [...(currentState.solayerProofs || []), ...(nextState.solayerProofs || [])]
@@ -1199,7 +1427,7 @@ export async function persistReceiptReview(record: ReceiptReviewRecord): Promise
     return {
       configured: Boolean(databaseUrl()),
       persisted: false,
-      reason: "Only minted BNB receipt credentials are persisted for agent data.",
+      reason: "Only minted Solana receipt credentials are persisted for agent data.",
     };
   }
 

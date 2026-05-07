@@ -6,9 +6,9 @@ import {
   publicMerchantOrder,
   recordMerchantPilotEvent,
   updateMerchantOrderStatus,
-  type MerchantOrder,
   type MerchantOrderItem,
 } from "@/server/merchantOrderStore";
+import { nfcStationUrl, notifyMerchantGroup } from "@/server/telegramMerchantNotify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,12 +54,18 @@ type ParsedCallbackData =
   | { action: "confirm_order"; merchantId: string; itemId: string; quantity: number; noteCode?: string }
   | { action: "change_order"; merchantId: string };
 
+type TelegramWebhookGlobal = typeof globalThis & {
+  jiagonTelegramNoteMemory?: Map<string, string>;
+};
+
 const DEFAULT_MERCHANT_ID = "raposa-coffee";
 const MAX_TELEGRAM_BODY_BYTES = 20_000;
 const DEFAULT_TELEGRAM_API_TIMEOUT_MS = 5_000;
 const TELEGRAM_CALLBACK_TOKEN_MAX = 32;
 const TELEGRAM_CALLBACK_TOKEN_PATTERN = /^[a-z0-9-]{1,32}$/;
-const TELEGRAM_STAFF_ORDER_CALLBACK_PATTERN = /^ord-[a-f0-9]{16}$/;
+// Custom note callbacks store a bounded in-process hint, then fall back to parsing
+// the Telegram draft message. Persist notes before confirm if this becomes critical.
+const MAX_NOTE_MEMORY_SIZE = 250;
 
 let warnedMissingProductionOrigin = false;
 
@@ -183,11 +189,26 @@ function noteCodeForText(text: string) {
   if (normalized.includes(" no ice ") || normalized.includes(" 去冰 ")) return "no-ice";
   if (normalized.includes(" oat ") || normalized.includes(" 燕麥 ")) return "oat-milk";
   if (normalized.includes(" extra hot ") || normalized.includes(" 熱一點 ")) return "extra-hot";
+  const cleaned = cleanNotes(text);
+  if (cleaned) {
+    const noteCode = `note-${createHash("sha256").update(cleaned).digest("hex").slice(0, 12)}`;
+    const globalStore = globalThis as TelegramWebhookGlobal;
+    const memory = globalStore.jiagonTelegramNoteMemory || new Map<string, string>();
+    globalStore.jiagonTelegramNoteMemory = memory;
+    memory.set(noteCode, cleaned);
+    while (memory.size > MAX_NOTE_MEMORY_SIZE) {
+      const oldestKey = memory.keys().next().value;
+      if (!oldestKey) break;
+      memory.delete(oldestKey);
+    }
+    return noteCode;
+  }
   return "";
 }
 
 function noteTextFromCode(noteCode: string | undefined) {
-  switch (cleanNoteCode(noteCode)) {
+  const cleanedCode = cleanNoteCode(noteCode);
+  switch (cleanedCode) {
     case "less-ice":
       return "less ice";
     case "no-ice":
@@ -197,8 +218,14 @@ function noteTextFromCode(noteCode: string | undefined) {
     case "extra-hot":
       return "extra hot";
     default:
-      return "";
+      return ((globalThis as TelegramWebhookGlobal).jiagonTelegramNoteMemory || new Map()).get(cleanedCode) || "";
   }
+}
+
+function noteTextFromDraftMessage(text: string | undefined) {
+  if (!text) return "";
+  const match = /^Notes:\s*(.+)$/im.exec(text);
+  return match ? cleanNotes(match[1]) : "";
 }
 
 function normalizedNaturalText(value: string) {
@@ -486,62 +513,13 @@ async function sendTelegramMethod(method: string, payload: Record<string, unknow
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-    return { sent: response.ok, skipped: false };
+    const result = await response.json().catch(() => null) as { ok?: boolean } | null;
+    return { sent: response.ok && result?.ok === true, skipped: false };
   } catch {
     return { sent: false, skipped: false };
   } finally {
     clearTimeout(timeoutId);
   }
-}
-
-function telegramOrderLines(order: MerchantOrder) {
-  return order.items.map((item) => `- ${item.quantity}x ${item.name}`).join("\n");
-}
-
-function staffOrderCallbackData(action: "paid_done" | "cancel", orderId: string) {
-  if (!TELEGRAM_STAFF_ORDER_CALLBACK_PATTERN.test(orderId)) {
-    throw new Error("Telegram staff callback order id does not match the parser contract.");
-  }
-  return `${action}:${orderId}`;
-}
-
-function nfcStationUrl(origin: string, merchantId: string) {
-  return `${origin}/tile/${merchantId}?station=raposa-counter`;
-}
-
-async function notifyMerchantGroup(order: MerchantOrder) {
-  const chatId = merchantGroupChatId();
-  if (!chatId) return { sent: false, skipped: true };
-  if (!telegramBotToken()) return { sent: false, skipped: false };
-
-  const text = [
-    `Agent queued ${order.merchantName} Order Pass #${order.pickupCode}`,
-    "",
-    `Customer: ${order.customerLabel || "Telegram customer"}`,
-    "Parsed order:",
-    telegramOrderLines(order),
-    `Estimated total: $${order.subtotalUsd}`,
-    order.notes ? `Notes: ${order.notes}` : "",
-    "",
-    `Order Pass: ${order.pickupCode}`,
-    "Payment: collect at counter POS / cash / card",
-    "Next action: confirm payment, make the order, then tap Paid + Done.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return sendTelegramMethod("sendMessage", {
-    chat_id: chatId,
-    text,
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "Paid + Done", callback_data: staffOrderCallbackData("paid_done", order.id) },
-          { text: "Cancel", callback_data: staffOrderCallbackData("cancel", order.id) },
-        ],
-      ],
-    },
-  });
 }
 
 function callbackData(value: unknown): ParsedCallbackData | null {
@@ -704,7 +682,7 @@ async function handleCallback(request: Request, callback: TelegramCallbackQuery)
       merchant,
       menuItem,
       quantity: parsed.quantity,
-      notes: noteTextFromCode(parsed.noteCode),
+      notes: noteTextFromCode(parsed.noteCode) || noteTextFromDraftMessage(callback.message?.text),
       origin: requestOrigin(request),
     });
   }

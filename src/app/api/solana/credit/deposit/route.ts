@@ -1,5 +1,8 @@
 import { bearerTokenFromRequest, verifyPrivyAccessToken } from "@/server/privyAuth";
-import { getMerchantReceiptCreditProfile } from "@/server/receiptStore";
+import {
+  releaseMerchantReceiptCreditReservation,
+  reserveMerchantReceiptCreditAtomic,
+} from "@/server/receiptStore";
 import {
   drawDevnetRestaurantDeposit,
   repayDevnetRestaurantDeposit,
@@ -117,35 +120,60 @@ export async function POST(request: Request) {
       if (cents == null || cents <= 0 || cents > 2_500) {
         return Response.json({ error: "Draw amount must be greater than $0 and at most $25 for the demo." }, { status: 400 });
       }
-      const creditProfile = await getMerchantReceiptCreditProfile(claims.userId);
-      if (creditProfile.error) {
-        return Response.json({ error: creditProfile.error }, { status: 503 });
+      const reservation = await reserveMerchantReceiptCreditAtomic(claims.userId, cents);
+      if (reservation.error) {
+        return Response.json({ error: reservation.error }, { status: 503 });
       }
-      if (!creditProfile.configured) {
+      if (!reservation.configured) {
         return Response.json(
           { error: "Server-side merchant receipt credit index is not configured." },
           { status: 503 },
         );
       }
-      if (creditProfile.unlockedCreditCents <= 0 || creditProfile.mintedReceiptCount <= 0) {
+      if (reservation.mintedReceiptCount <= 0) {
         return Response.json(
           { error: "Mint a Bubblegum merchant receipt cNFT before drawing devnet credit." },
           { status: 403 },
         );
       }
-      if (cents > creditProfile.unlockedCreditCents) {
+      if (reservation.unlockedCreditCents <= 0) {
+        return Response.json(
+          { error: "Devnet credit is exhausted for the currently minted receipts." },
+          { status: 403 },
+        );
+      }
+      if (!reservation.reserved) {
         return Response.json(
           {
-            error: `Draw amount exceeds unlocked credit of $${(creditProfile.unlockedCreditCents / 100).toFixed(2)}.`,
-            unlockedCreditUsd: (creditProfile.unlockedCreditCents / 100).toFixed(2),
+            error: `Draw amount exceeds unlocked credit of $${(reservation.unlockedCreditCents / 100).toFixed(2)}.`,
+            unlockedCreditUsd: (reservation.unlockedCreditCents / 100).toFixed(2),
           },
           { status: 400 },
         );
       }
-      const result = await drawDevnetRestaurantDeposit({
-        amountCents: cents,
-        merchantName: cleanText(body.merchantName, "restaurant"),
-      });
+      let result: Awaited<ReturnType<typeof drawDevnetRestaurantDeposit>>;
+      try {
+        result = await drawDevnetRestaurantDeposit({
+          amountCents: cents,
+          merchantName: cleanText(body.merchantName, "restaurant"),
+        });
+      } catch (error) {
+        try {
+          await releaseMerchantReceiptCreditReservation(claims.userId, reservation.reservations);
+        } catch (releaseError) {
+          console.error("Jiagon failed to release devnet credit reservation after draw error.", {
+            userId: claims.userId,
+            reservations: reservation.reservations,
+            error: releaseError,
+          });
+        }
+        throw error;
+      }
+      const creditProfile = reservation.creditProfile || {
+        unlockedCreditCents: Math.max(0, reservation.unlockedCreditCents - cents),
+        mintedReceiptCount: reservation.mintedReceiptCount,
+        receiptIds: reservation.receiptIds,
+      };
       return Response.json({
         ...result,
         creditProfile: {

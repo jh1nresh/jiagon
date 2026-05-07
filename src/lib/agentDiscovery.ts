@@ -1,15 +1,15 @@
 const product = {
   name: "Jiagon",
   title: "Jiagon verified local recommendation API",
-  description: "Receipt-backed local recommendation data for agents.",
+  description: "Receipt-backed local ordering, recommendation, and credit data for agents.",
   version: "0.1.0",
 };
 
 const proofLevels = {
-  A: "Onchain card spend event.",
-  B: "BNB testnet receipt credential minted from verified payment and user-claimed merchant.",
-  C: "User-claimed merchant on top of verified payment.",
-  D: "Self-claimed review without payment proof.",
+  A: "Solana payment plus merchant fulfillment plus customer claim.",
+  B: "Bubblegum receipt cNFT minted from merchant-completed, customer-claimed receipt.",
+  C: "Merchant-completed order receipt claimed by the customer.",
+  D: "Order intent only; not credit-grade until merchant completion.",
 };
 
 const privacy =
@@ -28,11 +28,18 @@ export function agentDiscovery(origin: string) {
     humanDocs: `${origin}/api/agent`,
     openapi: `${origin}/openapi.json`,
     wellKnown: `${origin}/.well-known/jiagon-agent.json`,
-    primaryUseCase: "Ask Jiagon for local recommendations backed by verified receipt signals.",
-    exampleUserIntent: "I want coffee near Irvine. Recommend a place with receipt-backed reviews.",
+    primaryUseCase: "Let a personal agent order from a merchant, then turn fulfilled receipts into Jiagon Passport and purpose-bound credit history.",
+    exampleUserIntent: "Order one iced latte at Raposa Coffee and tell me when to pick it up.",
     exampleAgentCall: {
-      method: "GET",
-      url: `${origin}/api/agent/recommendations?query=coffee%20irvine&limit=3`,
+      method: "POST",
+      url: `${origin}/api/agent/orders`,
+      body: {
+        agentId: "seeker-demo-agent",
+        userIntent: "Order one iced latte at Raposa Coffee",
+        merchantId: "raposa-coffee",
+        maxSpendUsd: "10.00",
+        paymentMode: "crypto_pay",
+      },
     },
     exampleRerankCall: {
       method: "POST",
@@ -53,6 +60,25 @@ export function agentDiscovery(origin: string) {
       },
     },
     endpoints: {
+      order: {
+        method: "POST",
+        url: `${origin}/api/agent/orders`,
+        body: {
+          agentId: "Stable id for the user's personal agent.",
+          userIntent: "Natural order request. Example: order one iced latte at Raposa Coffee.",
+          merchantId: "Known Jiagon merchant id. Demo: raposa-coffee.",
+          items: "Optional structured menu items instead of natural language.",
+          maxSpendUsd: "Optional user spending policy enforced before the order pass is created.",
+          paymentMode: "Optional: crypto_pay or pay_at_counter. Legacy helio_pay and solana_pay aliases are accepted.",
+        },
+        returns: [
+          "order pass and pickup code",
+          "pickup estimate",
+          "optional Crypto Pay on Solana test request",
+          "merchant staff dispatch status",
+          "NFC receipt station URL for claim after merchant Paid + Done",
+        ],
+      },
       recommendations: {
         method: "GET",
         url: `${origin}/api/agent/recommendations`,
@@ -65,7 +91,7 @@ export function agentDiscovery(origin: string) {
           "proof level boundaries",
           "agent-readable reasons",
           "aggregate verified visits and wallets",
-          "credential chain and source chain context",
+          "credential and proof-level context",
         ],
       },
       rerank: {
@@ -97,10 +123,10 @@ export function agentDiscovery(origin: string) {
     },
     proofLevels,
     architecture: {
-      sourceChain: "optimism",
-      credentialChain: "bnb-testnet",
-      storageLayer: "greenfield-testnet",
-      flow: "OP Spend event -> Jiagon verification -> BNB testnet receipt credential -> Greenfield data object -> agent API",
+      source: "agentic-pos-order",
+      credentialChain: "solana-devnet",
+      storageLayer: "receipt metadata URI",
+      flow: "Agent order -> merchant fulfillment -> customer claim -> Bubblegum receipt cNFT -> Jiagon Passport -> purpose-bound credit",
     },
   };
 }
@@ -169,6 +195,37 @@ export function openApiSpec(origin: string) {
             },
             "503": {
               description: "Receipt signal store unavailable.",
+            },
+          },
+        },
+      },
+      "/api/agent/orders": {
+        post: {
+          tags: ["Agent"],
+          summary: "Create an agent-mediated merchant order pass.",
+          operationId: "createAgentMerchantOrder",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/AgentOrderRequest" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Order pass created for merchant fulfillment.",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AgentOrderResponse" },
+                },
+              },
+            },
+            "409": {
+              description: "Order exceeds user agent spending policy.",
+            },
+            "422": {
+              description: "Agent request needs clarification before an order can be created.",
             },
           },
         },
@@ -289,6 +346,45 @@ export function openApiSpec(origin: string) {
                 },
               },
             },
+          },
+        },
+        AgentOrderRequest: {
+          type: "object",
+          properties: {
+            agentId: { type: "string", examples: ["seeker-demo-agent"] },
+            userIntent: {
+              type: "string",
+              examples: ["Order one iced latte at Raposa Coffee"],
+              description: "Natural language order intent. Required when items is omitted.",
+            },
+            merchantId: { type: "string", examples: ["raposa-coffee"], default: "raposa-coffee" },
+            items: {
+              type: "array",
+              description: "Optional structured menu items. When supplied, userIntent may be omitted.",
+              items: {
+                type: "object",
+                properties: {
+                  itemId: { type: "string", examples: ["iced-latte"] },
+                  quantity: { type: "integer", minimum: 1, maximum: 20 },
+                },
+              },
+            },
+            maxSpendUsd: { type: "string", examples: ["10.00"] },
+            paymentMode: { type: "string", enum: ["crypto_pay", "pay_at_counter", "helio_pay", "solana_pay"] },
+          },
+        },
+        AgentOrderResponse: {
+          type: "object",
+          properties: {
+            product: { type: "string" },
+            status: { type: "string", examples: ["order_pass_created"] },
+            proofLevel: { type: "string", examples: ["order_intent_only"] },
+            agent: { type: "object" },
+            order: { type: "object" },
+            pickup: { type: "object" },
+            payment: { type: "object" },
+            staffDispatch: { type: "string", enum: ["sent", "skipped", "failed"] },
+            urls: { type: "object" },
           },
         },
         RerankResponse: {

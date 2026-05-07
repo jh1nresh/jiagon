@@ -4,9 +4,9 @@ Agentic POS and onchain receipt passport for real-world purchases.
 
 Jiagon turns a merchant-completed order into a customer-claimed receipt that can
 be minted as a Solana receipt credential and used for purpose-bound credit. The
-current MVP starts with a coffee-shop flow: customers order through Telegram,
-pay normally at the counter, staff taps `Paid + Done`, and the customer taps NFC
-to claim the receipt into a Jiagon Passport.
+current MVP starts with a coffee-shop flow: a user's personal agent orders from
+Raposa Coffee through Jiagon, staff taps `Paid + Done`, and the customer claims
+the fulfilled receipt into a Jiagon Passport.
 
 Live app: [jiagon.vercel.app](https://jiagon.vercel.app)
 
@@ -29,7 +29,7 @@ flow.
 ## Product Flow
 
 ```txt
-Telegram or tile order
+Personal agent order API
 -> Merchant queue
 -> Staff taps Paid + Done
 -> Jiagon issues a claimable receipt
@@ -42,7 +42,8 @@ Telegram or tile order
 
 Primary app surfaces:
 
-- **Tile**: customer order and NFC pickup station, e.g. `/tile/raposa-coffee`.
+- **Agent API**: personal agent order intake at `/api/agent/orders`.
+- **Tile**: NFC pickup station and manual fallback, e.g. `/tile/raposa-coffee`.
 - **Merchant**: order queue, `Paid + Done`, receipt issuing, demo readiness,
   pilot metrics, and credit memo.
 - **Passport**: customer receipt wallet for claimed merchant receipts.
@@ -55,7 +56,7 @@ Primary app surfaces:
 - Web app: Next.js App Router.
 - Mobile app: Expo Android under `apps/mobile`.
 - Auth: Privy on web and Privy Expo on mobile.
-- Order entry: Telegram bot and `/tile/{merchant}`.
+- Order entry: personal agent API, Telegram bot, and `/tile/{merchant}` fallback.
 - Pilot merchant: Raposa Coffee.
 - Receipt pickup: static NFC station plus pickup code.
 - Receipt credential: Solana Bubblegum cNFT when Bubblegum env is configured;
@@ -110,6 +111,27 @@ GET /api/agent
 GET /openapi.json
 ```
 
+Create a merchant order from a personal agent:
+
+```txt
+POST /api/agent/orders
+```
+
+The response returns an order pass, pickup code, pickup estimate, merchant
+dispatch status, and optional Crypto Pay on Solana test request. Supported demo
+payment modes are `crypto_pay` and `pay_at_counter`. Legacy `helio_pay` and
+`solana_pay` aliases are accepted as `crypto_pay`.
+
+Browser demo:
+
+```txt
+GET /agent-order
+```
+
+Use this page to simulate a personal agent call, then open the returned Crypto
+Pay checkout. Jiagon prefers Helio Solana checkout when `HELIO_PAYLINK_ID` is
+configured, with direct Solana Pay as the fallback.
+
 Recommendation from Jiagon's proof graph:
 
 ```txt
@@ -143,11 +165,11 @@ Private receipt passport data is not returned by public agent APIs.
 ## Demo Flow
 
 ```txt
-Customer opens Telegram bot
--> chooses a coffee item
--> gets a pickup code
+User asks personal agent to order one iced latte
+-> agent calls /api/agent/orders
+-> Jiagon returns pickup code, ETA, and optional Crypto Pay on Solana request
 -> merchant Telegram group or /merchant receives the order
--> customer pays normally at the counter
+-> customer pays through Crypto Pay if configured, otherwise at the counter
 -> staff taps Paid + Done
 -> Jiagon issues a receipt claim token
 -> customer taps NFC station
@@ -179,6 +201,8 @@ Minimum app config:
 NEXT_PUBLIC_PRIVY_APP_ID=your-privy-app-id
 PRIVY_VERIFICATION_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
 JIAGON_APP_ORIGIN=http://localhost:3000
+SOLANA_CLUSTER=devnet
+SOLANA_RPC_URL=https://api.devnet.solana.com
 ```
 
 Optional merchant, Telegram, Solana, and persistence config:
@@ -190,9 +214,14 @@ JIAGON_MERCHANT_ISSUER_KEY=use-a-random-demo-merchant-key
 JIAGON_MERCHANT_RECEIPT_SIGNING_SECRET=use-a-random-receipt-signing-secret
 TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 TELEGRAM_MERCHANT_GROUP_CHAT_ID=your-staff-group-chat-id
+HELIO_PAYLINK_ID=your-dev-helio-paylink-id
+HELIO_NETWORK=test
 SOLANA_BUBBLEGUM_TREE=your-devnet-tree
 SOLANA_BUBBLEGUM_MINTER_SECRET_KEY=never-commit-real-private-keys
 ```
+
+Jiagon is testnet-only for the current demo. Server routes reject mainnet
+cluster values and obvious mainnet RPC URLs.
 
 Run the dev server:
 
@@ -219,18 +248,11 @@ Run the web build:
 pnpm build
 ```
 
-Run contract tests:
-
-```bash
-forge test -vvv
-```
-
-BNB testnet deployment notes live in
-[`docs/deploy/bnb-testnet.md`](docs/deploy/bnb-testnet.md).
-
 ## API Surface
 
-- `GET /api/etherfi/spends`: scans ether.fi Cash spend candidates by tx or safe.
+- `POST /api/agent/orders`: lets a personal agent create a Raposa order pass,
+  enforce a max-spend policy, return pickup timing, and optionally prepare a
+  Crypto Pay on Solana test request.
 - `POST /api/merchant/orders`: creates an agentic merchant order.
 - `GET /api/merchant/orders`: returns the merchant order queue.
 - `POST /api/merchant/orders/{id}/complete`: marks an order `Paid + Done`
@@ -242,10 +264,9 @@ BNB testnet deployment notes live in
   claim.
 - `POST /api/solana/merchant-receipts/mint`: mints or prepares a Solana
   Bubblegum merchant receipt credential.
-- `POST /api/receipts/publish`: app-facing publish endpoint.
-- `POST /api/receipts/mint`: verifies an OP spend and prepares or mints a BNB
-  legacy receipt credential.
 - `GET /api/receipts/reviews`: returns persisted published receipt reviews.
+- `POST /api/solayer/proofs`: uploads a Solana wallet-attested offchain proof
+  adapter for future underwriting signals.
 - `GET /api/agent/recommendations`: returns Jiagon-native recommendations.
 - `POST /api/agent/rerank`: boosts external place candidates with Jiagon proof.
 - `GET /api/account/state`: private account state; requires a Privy bearer token.
@@ -254,21 +275,12 @@ Mint routes return `status: "minted"` only after the API broadcasts and
 confirms a transaction. If required chain env is missing, they return
 `status: "prepared"` and never claim that an onchain receipt exists.
 
-## Legacy Adapters
-
-The older ether.fi Cash and BNB testnet paths remain useful as proof-source and
-credential experiments, but they are no longer the primary public pitch. The
-current product direction is Solana-first: merchant-issued receipts, Bubblegum
-cNFTs, receipt passport, and purpose-bound credit.
-
 ## Development Workflow
 
-For contract, proof, credential, auth, or minting changes:
+For proof, credential, auth, or minting changes:
 
 - use a scoped `codex/*` branch;
 - run `pnpm build`;
-- run `forge test -vvv` for contract changes;
-- run Solidity audit review for contract changes;
 - request independent local code review for security-sensitive changes;
 - open a PR;
 - squash merge after approval.

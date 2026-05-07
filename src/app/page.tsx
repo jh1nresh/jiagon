@@ -1,1880 +1,316 @@
-"use client";
+import Link from "next/link";
 
-import { useState, useEffect, useRef } from "react";
-import { PrivyProvider, usePrivy, type PrivyClientConfig } from "@privy-io/react-auth";
-import {
-  OnboardingScreen, FeedScreen, InboxScreen, WriteReviewScreen,
-  ReviewDetailScreen, ProfileScreen, CreditScreen,
-} from "@/components/screens";
-import { buildReceiptPublishMessage } from "@/lib/receiptPublish";
-import { buildSolanaOwnerLinkMessage } from "@/lib/solanaOwnerLink";
-import {
-  buildSolayerProofMessage,
-  type SolayerCreditProof,
-  type SolayerProofInput,
-} from "@/lib/solayerProof";
+const demoCurl = `curl -X POST https://jiagon.vercel.app/api/agent/orders \\
+  -H "content-type: application/json" \\
+  -d '{
+    "agentId": "seeker-demo-agent",
+    "userIntent": "Order one iced latte at Raposa Coffee",
+    "merchantId": "raposa-coffee",
+    "maxSpendUsd": "10.00",
+    "paymentMode": "crypto_pay"
+  }'`;
 
-type EthereumProvider = {
-  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-};
-
-type Tab = "passport" | "feed" | "inbox" | "credit" | "profile";
-type VerifyStyle = "chip" | "stamp";
-type Density = "compact" | "comfy";
-
-type AuthState = {
-  ready: boolean;
-  authenticated: boolean;
-  appConfigured: boolean;
-  accountKey?: string;
-  userLabel?: string;
-  walletLabel?: string;
-  login: () => Promise<void>;
-  logout: () => Promise<void>;
-  getAccessToken?: () => Promise<string | null>;
-};
-
-type StoredSession = {
-  userLabel?: string;
-  walletLabel?: string;
-  walletAddress?: string;
-};
-
-type PrivyBridge = {
-  ready: boolean;
-  authenticated: boolean;
-  user: unknown;
-  getAccessToken: () => Promise<string | null>;
-  logout: () => Promise<void>;
-};
-
-const authStorageKey = "jiagon:privy-session";
-const etherfiStorageKey = "jiagon:etherfi-sync";
-const solayerProofsStorageKey = "jiagon:solayer-proofs";
-const reviewsStorageKey = "jiagon:published-reviews";
-const reviewedReceiptsStorageKey = "jiagon:reviewed-receipts";
-const receiptCredentialsStorageKey = "jiagon:receipt-credentials";
-const merchantReceiptsStorageKey = "jiagon:merchant-receipts";
-const accountUserStorageKey = "jiagon:account-user-id";
-const localDemoHosts = new Set(["localhost", "127.0.0.1", "::1"]);
-
-const privyConfig: PrivyClientConfig = {
-  loginMethods: ["wallet", "email", "google"],
-  appearance: {
-    theme: "light" as const,
-    accentColor: "#A9573D" as const,
-    showWalletLoginFirst: true,
-    walletChainType: "ethereum-only" as const,
-    walletList: [
-      "detected_ethereum_wallets",
-      "metamask",
-      "coinbase_wallet",
-      "base_account",
-      "okx_wallet",
-      "wallet_connect",
-    ],
-  },
-  embeddedWallets: {
-    ethereum: { createOnLogin: "off" as const },
-    solana: { createOnLogin: "off" as const },
-    showWalletUIs: false,
-  },
-};
-
-const shortAddress = (address?: string) => {
-  if (!address) return undefined;
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-};
-
-const getPrimaryWallet = (user: unknown) => {
-  const typedUser = user as {
-    wallet?: { address?: string };
-    linkedAccounts?: Array<{ type?: string; address?: string }>;
-  } | null;
-
-  return (
-    typedUser?.wallet?.address ||
-    typedUser?.linkedAccounts?.find((account) => account.type === "wallet")?.address
-  );
-};
-
-const getUserLabel = (user: unknown, walletAddress?: string) => {
-  const typedUser = user as {
-    id?: string;
-    email?: { address?: string };
-    phone?: { number?: string };
-    google?: { email?: string };
-    linkedAccounts?: Array<{
-      type?: string;
-      email?: string;
-      address?: string;
-      phoneNumber?: string;
-    }>;
-  } | null;
-
-  const linkedEmail = typedUser?.linkedAccounts?.find((account) => account.email)?.email;
-  const linkedPhone = typedUser?.linkedAccounts?.find((account) => account.phoneNumber)?.phoneNumber;
-
-  return (
-    typedUser?.email?.address ||
-    typedUser?.google?.email ||
-    linkedEmail ||
-    typedUser?.phone?.number ||
-    linkedPhone ||
-    shortAddress(walletAddress) ||
-    typedUser?.id
-  );
-};
-
-const proofBoundary = {
-  payment: "verified",
-  merchant: "user_claimed",
-  review: "published_after_verified_payment",
-  recommendationUse: "ranking signal, not an official merchant fact",
-};
-
-type EtherfiReceipt = {
-  id: string;
-  txHash: string;
-  txShort: string;
-  blockNumber: number;
-  timestamp?: number;
-  amountUsd: string;
-  proof: string;
-  chain: string;
-};
-
-type EtherfiSyncState = {
-  safe?: string;
-  sourceTx?: string;
-  sourceTxBlock?: number;
-  status: "idle" | "scanning" | "synced" | "error";
-  receipts: EtherfiReceipt[];
-  totalSpendUsd?: string;
-  count?: number;
-  scope?: string;
-  lookbackBlocks?: number;
-  fromBlock?: number;
-  toBlock?: number;
-  scannedAt?: string;
-  error?: string;
-};
-
-type EtherfiSpendPayload = Omit<EtherfiSyncState, "status" | "scannedAt" | "error">;
-
-type ReceiptCredential = {
-  receiptId: string;
-  reviewId: string;
-  status: string;
-  mode?: string;
-  network: string;
-  chainId?: number;
-  credentialChain: string;
-  credentialId: string;
-  preparedCredentialId?: string;
-  credentialTx?: string | null;
-  explorerUrl?: string | null;
-  assetExplorerUrl?: string | null;
-  storageLayer: string;
-  storageUri: string;
-  requestedStorageUri?: string;
-  sourceReceiptHash?: string;
-  solanaOwner?: string;
-  metaplexCoreAsset?: string;
-  merkleTree?: string;
-  standard?: string;
-  dataHash: string;
-  requestedDataHash?: string;
-  dataMatchesRequest?: boolean;
-  proofLevel: string;
-  mintedAt: string;
-  preparedAt?: string;
-  minter?: string;
-  note?: string;
-  persistence?: {
-    configured: boolean;
-    persisted: boolean;
-    reason?: string;
-    error?: string;
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onchain?: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  solana?: any;
-};
-
-type MerchantPassportReceipt = {
-  id: string;
-  merchantName: string;
-  location?: string | null;
-  receiptNumber: string;
-  amountUsd: string;
-  currency?: string;
-  category?: string;
-  purpose?: string;
-  status: string;
-  receiptHash: string;
-  signature?: string | null;
-  signatureAlgorithm?: string;
-  issuedAt?: string;
-  claimedAt?: string | null;
-  mintStatus?: string;
-  credentialId?: string;
-  credentialChain?: string;
-  standard?: string;
-  dataHash?: string;
-  storageUri?: string;
-  solanaOwner?: string;
-  credentialTx?: string | null;
-  explorerUrl?: string | null;
-  assetExplorerUrl?: string | null;
-  creditImpact?: {
-    eligible?: boolean;
-    unlockedCreditUsd?: number;
-    reason?: string;
-  };
-};
-
-const emptyEtherfiSync: EtherfiSyncState = {
-  status: "idle",
-  receipts: [],
-};
-
-function shortHash(value?: string | null) {
-  if (!value) return "published";
-  return `${value.slice(0, 6)}…${value.slice(-4)}`;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toFeedReviewFromPublic(record: any) {
-  const branch = record.branch || "Local";
-  const attributes = record.reviewAttributes || {};
-
-  return {
-    id: record.reviewId || record.receiptId,
-    receiptId: record.receiptId,
-    reviewId: record.reviewId,
-    author: "you",
-    avatar: "var(--accent-soft)",
-    rep: "verified",
-    handle: record.publicProofId ? `proof ${record.publicProofId}` : shortHash(record.credentialTx),
-    merchant: record.merchant,
-    branch,
-    cat: `Local · ${branch}`,
-    rating: record.rating,
-    time: record.createdAt ? new Date(record.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "published",
-    tags: Array.isArray(record.tags) ? record.tags : [],
-    text: record.reviewText || "",
-    tx: shortHash(record.credentialTx),
-    amount: record.token ? `Verified ${record.token}` : "Verified receipt",
-    proofLevel: `${record.proofLevel || "B"} · BNB minted`,
-    credentialTx: record.credentialTx ? shortHash(record.credentialTx) : record.credentialId,
-    credential: {
-      status: record.status,
-      mode: record.mode,
-      credentialChain: record.credentialChain,
-      chainId: record.chainId,
-      credentialId: record.credentialId,
-      credentialTx: record.credentialTx,
-      explorerUrl: record.explorerUrl,
-      storageUri: record.storageUri,
-      dataHash: record.dataHash,
-      dataMatchesRequest: record.dataMatchesRequest,
-      proofLevel: record.proofLevel,
-    },
-    dataMatchesRequest: record.dataMatchesRequest,
-    verifiedVisits: 1,
-    merchantProof: "C · user claimed",
-    visitType: attributes.visitType,
-    occasion: attributes.occasion,
-    valueRating: attributes.valueRating,
-    wouldReturn: attributes.wouldReturn,
-    bestFor: Array.isArray(attributes.bestFor) ? attributes.bestFor : [],
-    agentSignals: {
-      visitType: attributes.visitType || null,
-      occasion: attributes.occasion || null,
-      valueRating: attributes.valueRating || null,
-      wouldReturn: typeof attributes.wouldReturn === "boolean" ? attributes.wouldReturn : null,
-      bestFor: Array.isArray(attributes.bestFor) ? attributes.bestFor : [],
-    },
-    proofBoundary,
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mergeReviews(current: any[], incoming: any[]) {
-  const byId = new Map<string, any>();
-  for (const review of incoming) {
-    if (review?.id) byId.set(review.id, review);
-  }
-  for (const review of current) {
-    if (review?.id) byId.set(review.id, review);
-  }
-  return Array.from(byId.values());
-}
-
-function readStoredJson(key: string) {
-  try {
-    const stored = window.localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : null;
-  } catch {
-    window.localStorage.removeItem(key);
-    return null;
-  }
-}
-
-function normalizeRestoredEtherfiSync(value: unknown): EtherfiSyncState | null {
-  if (!value || typeof value !== "object") return null;
-
-  const state = value as Partial<EtherfiSyncState>;
-  const receipts = Array.isArray(state.receipts) ? state.receipts : [];
-  const status = state.status;
-
-  if (status === "scanning") {
-    if (receipts.length > 0) {
-      return {
-        ...state,
-        status: "synced",
-        receipts,
-        error: undefined,
-        scannedAt: state.scannedAt || new Date().toISOString(),
-      } as EtherfiSyncState;
-    }
-
-    return {
-      safe: state.safe,
-      sourceTx: state.sourceTx,
-      sourceTxBlock: state.sourceTxBlock,
-      status: "idle",
-      receipts: [],
-    };
-  }
-
-  if (status === "idle" || status === "synced" || status === "error") {
-    return {
-      ...state,
-      status,
-      receipts,
-    } as EtherfiSyncState;
-  }
-
-  return null;
-}
-
-function writeStoredEtherfiSync(state: EtherfiSyncState) {
-  const normalized = normalizeRestoredEtherfiSync(state);
-  if (!normalized) return;
-  window.localStorage.setItem(etherfiStorageKey, JSON.stringify(normalized));
-}
-
-function normalizeRestoredSolayerProofs(value: unknown): SolayerCreditProof[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((proof): proof is SolayerCreditProof => {
-      const record = proof && typeof proof === "object" ? proof as Record<string, any> : null;
-      return Boolean(
-        record &&
-        record.provider === "solayer" &&
-        record.status === "adapter-attested" &&
-        typeof record.proofHash === "string" &&
-        typeof record.signedAdapter?.signature === "string",
-      );
-    })
-    .slice(0, 25);
-}
-
-function writeStoredSolayerProofs(proofs: SolayerCreditProof[]) {
-  window.localStorage.setItem(solayerProofsStorageKey, JSON.stringify(normalizeRestoredSolayerProofs(proofs)));
-}
-
-function normalizeRestoredMerchantReceipts(value: unknown): MerchantPassportReceipt[] {
-  if (!Array.isArray(value)) return [];
-  const receiptsById = new Map<string, MerchantPassportReceipt>();
-
-  for (const item of value) {
-    const record = item && typeof item === "object" ? item as Partial<MerchantPassportReceipt> : null;
-    if (
-      !record ||
-      typeof record.id !== "string" ||
-      typeof record.merchantName !== "string" ||
-      typeof record.receiptHash !== "string"
-    ) {
-      continue;
-    }
-
-    receiptsById.set(record.id, {
-      id: record.id,
-      merchantName: record.merchantName,
-      location: typeof record.location === "string" ? record.location : null,
-      receiptNumber: typeof record.receiptNumber === "string" ? record.receiptNumber : record.id,
-      amountUsd: typeof record.amountUsd === "string" ? record.amountUsd : "0.00",
-      currency: typeof record.currency === "string" ? record.currency : "USD",
-      category: typeof record.category === "string" ? record.category : "Merchant",
-      purpose: typeof record.purpose === "string" ? record.purpose : "merchant_receipt",
-      status: typeof record.status === "string" ? record.status : "claimed",
-      receiptHash: record.receiptHash,
-      signature: typeof record.signature === "string" ? record.signature : null,
-      signatureAlgorithm: typeof record.signatureAlgorithm === "string" ? record.signatureAlgorithm : "local-demo",
-      issuedAt: typeof record.issuedAt === "string" ? record.issuedAt : undefined,
-      claimedAt: typeof record.claimedAt === "string" ? record.claimedAt : null,
-      mintStatus: typeof record.mintStatus === "string" ? record.mintStatus : "ready",
-      credentialId: typeof record.credentialId === "string" ? record.credentialId : undefined,
-      credentialChain: typeof record.credentialChain === "string" ? record.credentialChain : undefined,
-      standard: typeof record.standard === "string" ? record.standard : undefined,
-      dataHash: typeof record.dataHash === "string" ? record.dataHash : undefined,
-      storageUri: typeof record.storageUri === "string" ? record.storageUri : undefined,
-      solanaOwner: typeof record.solanaOwner === "string" ? record.solanaOwner : undefined,
-      credentialTx: typeof record.credentialTx === "string" ? record.credentialTx : null,
-      explorerUrl: typeof record.explorerUrl === "string" ? record.explorerUrl : null,
-      assetExplorerUrl: typeof record.assetExplorerUrl === "string" ? record.assetExplorerUrl : null,
-      creditImpact: record.creditImpact && typeof record.creditImpact === "object" ? record.creditImpact : undefined,
-    });
-  }
-
-  return Array.from(receiptsById.values()).slice(0, 250);
-}
-
-function writeStoredMerchantReceipts(receipts: MerchantPassportReceipt[]) {
-  window.localStorage.setItem(merchantReceiptsStorageKey, JSON.stringify(normalizeRestoredMerchantReceipts(receipts)));
-}
-
-function mergeRestoredMerchantReceipts(restored: unknown) {
-  const cached = normalizeRestoredMerchantReceipts(readStoredJson(merchantReceiptsStorageKey));
-  const incoming = normalizeRestoredMerchantReceipts(restored);
-  return normalizeRestoredMerchantReceipts([...cached, ...incoming]);
-}
-
-function hydrateLocalPrivateState(
-  setEtherfiSyncState: (state: EtherfiSyncState) => void,
-  setSolayerProofsState: (proofs: SolayerCreditProof[]) => void,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setReviewsState: (reviews: any[]) => void,
-  setReviewedIdsState: (ids: string[]) => void,
-  setCredentialsState: (credentials: Record<string, ReceiptCredential>) => void,
-  setMerchantReceiptsState: (receipts: MerchantPassportReceipt[]) => void,
-) {
-  const storedEtherfiSync = normalizeRestoredEtherfiSync(readStoredJson(etherfiStorageKey));
-  if (storedEtherfiSync) {
-    setEtherfiSyncState(storedEtherfiSync);
-    writeStoredEtherfiSync(storedEtherfiSync);
-  }
-
-  const storedSolayerProofs = normalizeRestoredSolayerProofs(readStoredJson(solayerProofsStorageKey));
-  if (storedSolayerProofs.length > 0) {
-    setSolayerProofsState(storedSolayerProofs);
-    writeStoredSolayerProofs(storedSolayerProofs);
-  }
-
-  const storedReviews = readStoredJson(reviewsStorageKey);
-  if (Array.isArray(storedReviews)) setReviewsState(storedReviews);
-
-  const storedReviewedReceiptIds = readStoredJson(reviewedReceiptsStorageKey);
-  if (Array.isArray(storedReviewedReceiptIds)) setReviewedIdsState(storedReviewedReceiptIds);
-
-  const storedReceiptCredentials = readStoredJson(receiptCredentialsStorageKey);
-  if (
-    storedReceiptCredentials &&
-    typeof storedReceiptCredentials === "object" &&
-    !Array.isArray(storedReceiptCredentials)
-  ) {
-    setCredentialsState(storedReceiptCredentials as Record<string, ReceiptCredential>);
-  }
-
-  const storedMerchantReceipts = normalizeRestoredMerchantReceipts(readStoredJson(merchantReceiptsStorageKey));
-  if (storedMerchantReceipts.length > 0) {
-    setMerchantReceiptsState(storedMerchantReceipts);
-    writeStoredMerchantReceipts(storedMerchantReceipts);
-  }
-}
-
-function initialTabFromPath(): Tab {
-  if (typeof window === "undefined") return "passport";
-  if (window.location.pathname === "/credit") return "credit";
-  if (window.location.pathname === "/passport") return "passport";
-  return "passport";
-}
-
-function pathForTab(tab: Tab) {
-  if (tab === "credit") return "/credit";
-  if (tab === "passport") return "/passport";
-  return "/";
-}
-
-const webTabs: Array<{ id: Tab; label: string; sub: string }> = [
-  { id: "passport", label: "Passport", sub: "On-chain receipt wallet" },
-  { id: "inbox", label: "Scan", sub: "Import tx proof" },
-  { id: "credit", label: "Credit", sub: "Passport and draw" },
-  { id: "feed", label: "Taste", sub: "Published proof feed" },
-  { id: "profile", label: "Profile", sub: "Wallet and reputation" },
+const flow = [
+  ["01", "Agent order", "Personal agent calls /api/agent/orders."],
+  ["02", "Order pass", "Jiagon returns pickup code, ETA, and payment intent."],
+  ["03", "Staff queue", "Raposa receives the order and taps Paid + Done."],
+  ["04", "Receipt passport", "Customer claims and mints a Bubblegum receipt cNFT."],
+  ["05", "Purpose credit", "Receipt history unlocks restaurant-deposit credit."],
 ];
 
-const webShellStyles = `
-.jiagon-web-shell{min-height:100vh;display:grid;grid-template-columns:300px minmax(0,1fr);background:radial-gradient(circle at 10% 0%,oklch(0.98 0.008 105) 0 280px,transparent 430px),linear-gradient(135deg,oklch(0.945 0.016 115) 0%,oklch(0.91 0.014 92) 58%,oklch(0.90 0.018 128) 100%);color:var(--ink)}.jiagon-web-sidebar{min-height:100vh;padding:26px 18px;border-right:.5px solid var(--rule);background:oklch(0.985 0.005 95 / .74);backdrop-filter:blur(18px);display:flex;flex-direction:column;gap:18px}.jiagon-web-brand{display:flex;align-items:center;gap:13px;padding:4px 4px 12px}.jiagon-web-mark{width:54px;height:54px;border:3px solid var(--verified);border-radius:9px;background:var(--receipt);color:var(--verified);display:grid;place-items:center;position:relative;flex:0 0 auto;box-shadow:0 10px 24px rgba(24,58,38,.10)}.jiagon-web-mark span{font-family:Georgia,'Times New Roman',serif;font-size:36px;font-weight:700;line-height:1;transform:translateY(-2px)}.jiagon-web-mark i{position:absolute;left:9px;right:18px;bottom:8px;border-bottom:2px dotted var(--verified)}.jiagon-web-mark b{position:absolute;top:4px;right:4px;width:16px;height:16px;border-radius:999px;background:var(--ink);color:var(--receipt);display:grid;place-items:center;font-family:var(--ui);font-size:10px}.jiagon-web-wordmark{font-family:var(--display);font-size:36px;line-height:.9;color:var(--verified)}.jiagon-web-kicker{font-family:var(--mono);font-size:10px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:1px}.jiagon-web-primary{min-height:46px;border:none;border-radius:10px;background:var(--verified);color:var(--panel-text);font-family:var(--ui);font-size:14px;font-weight:800;cursor:pointer}.jiagon-web-auth-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.jiagon-web-session-actions{display:grid;gap:8px}.jiagon-web-session-actions button{width:100%}.jiagon-web-auth-button{min-height:44px;border:.5px solid var(--rule);border-radius:10px;background:var(--receipt);color:var(--ink);font-family:var(--ui);font-size:13px;font-weight:800;cursor:pointer}.jiagon-web-auth-button-primary{border-color:transparent;background:var(--verified);color:var(--panel-text)}.jiagon-web-auth-button:disabled{cursor:not-allowed;opacity:.55}.jiagon-web-nav{display:grid;gap:7px}.jiagon-web-nav-item{text-align:left;border:.5px solid transparent;border-radius:10px;background:transparent;color:var(--ink);padding:12px;cursor:pointer}.jiagon-web-nav-item:hover,.jiagon-web-nav-item[data-active="true"]{border-color:var(--rule);background:var(--receipt);box-shadow:0 1px 0 rgba(24,24,24,.04)}.jiagon-web-nav-item span{display:block;font-family:var(--ui);font-size:14px;font-weight:800}.jiagon-web-nav-item small{display:block;margin-top:3px;font-family:var(--mono);font-size:9.5px;line-height:1.3;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.55px}.jiagon-web-status{margin-top:auto;border:.5px solid var(--rule);border-radius:12px;background:var(--receipt);padding:14px}.jiagon-web-status-grid{display:grid;grid-template-columns:1fr;gap:7px;margin-top:10px}.jiagon-web-status-grid div{display:flex;justify-content:space-between;gap:12px;font-family:var(--mono);font-size:10.5px;padding:6px 0;border-bottom:.5px dashed var(--rule)}.jiagon-web-status-grid span{color:var(--ink-muted)}.jiagon-web-status-grid strong{color:var(--ink)}.jiagon-web-status p{margin:10px 0 0;color:var(--ink-muted);font-size:12.5px;line-height:1.45}.jiagon-web-main{min-width:0;min-height:100vh;padding:28px clamp(22px,4vw,56px);position:relative}.jiagon-web-top{display:flex;justify-content:space-between;align-items:end;gap:24px;margin-bottom:18px}.jiagon-web-top h1{margin:5px 0 0;font-family:var(--display);font-style:italic;font-weight:400;font-size:clamp(42px,5vw,70px);line-height:.92;color:var(--ink)}.jiagon-web-proofline{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}.jiagon-web-proofline span{border:.5px solid var(--rule);border-radius:999px;background:var(--receipt);color:var(--ink-muted);padding:7px 10px;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.65px}.jiagon-web-workspace{min-height:0!important;border:0!important;border-radius:0!important;background:transparent!important;overflow:visible!important;box-shadow:none!important}.jiagon-web-content{max-width:1040px;position:relative;background:transparent!important}.jiagon-web-content>div{height:auto!important;min-height:0!important;background:transparent!important;overflow:visible!important}.jiagon-web-content>div>div:first-child{background:transparent!important}.jiagon-web-modal-root{position:absolute;inset:28px clamp(22px,4vw,56px);pointer-events:none;z-index:50}.jiagon-web-modal-root .screen{pointer-events:auto;position:absolute;inset:0;max-width:920px;margin:auto;border:.5px solid var(--rule);border-radius:12px;overflow:hidden;box-shadow:0 24px 90px rgba(24,24,24,.18)}@media(max-width:900px){.jiagon-web-shell{grid-template-columns:1fr}.jiagon-web-sidebar{min-height:auto;border-right:none;border-bottom:.5px solid var(--rule);padding:16px}.jiagon-web-nav{grid-template-columns:repeat(5,minmax(120px,1fr));overflow-x:auto}.jiagon-web-status{display:none}.jiagon-web-main{min-height:78vh;padding:18px 14px 28px}.jiagon-web-top{display:grid;align-items:start}.jiagon-web-proofline{justify-content:flex-start}.jiagon-web-workspace{min-height:0!important}}
-`;
-
-const logoMarkStyles = `
-.jiagon-logo-mark{display:block;object-fit:contain;filter:drop-shadow(0 10px 20px rgba(24,58,38,.10));flex:0 0 auto}.jiagon-logo-mark-sidebar{width:64px;height:70px}.jiagon-logo-mark-passport{width:92px;height:101px}
-`;
-
-const webUiPolishStyles = `
-.jiagon-web-shell{grid-template-columns:280px minmax(0,1fr)!important;height:100vh!important;min-height:100vh!important;overflow:hidden!important}.jiagon-web-sidebar{padding:24px 18px!important;gap:16px!important;height:100vh!important;min-height:100vh!important;position:sticky!important;top:0!important;overflow:hidden!important}.jiagon-web-brand{gap:10px!important}.jiagon-web-wordmark{font-size:34px!important}.jiagon-web-main{padding:24px clamp(24px,4vw,64px) 42px!important;height:100vh!important;min-height:0!important;overflow-y:auto!important;overscroll-behavior:contain!important}.jiagon-web-top{align-items:center!important;margin-bottom:22px!important}.jiagon-web-top h1{display:none!important}.jiagon-web-proofline{margin-left:auto}.jiagon-web-content{max-width:1120px!important}.jiagon-web-content:not(.jiagon-web-content-onboarding)>div>div:first-child{padding-top:0!important;padding-bottom:14px!important;position:relative!important;top:auto!important;background:transparent!important;border-bottom:0!important}.jiagon-web-content:not(.jiagon-web-content-onboarding)>div>div:first-child>div:first-child{padding-left:0!important;padding-right:0!important}.jiagon-web-content:not(.jiagon-web-content-onboarding)>div>div:first-child>div:last-child{padding-left:0!important;padding-right:0!important}.jiagon-web-content:not(.jiagon-web-content-onboarding) .jiagon-topbar{padding-top:0!important;padding-bottom:18px!important;position:relative!important;top:auto!important;z-index:1!important;background:transparent!important;border-bottom:0!important}.jiagon-web-content:not(.jiagon-web-content-onboarding) .jiagon-topbar-controls{display:none!important}.jiagon-web-content:not(.jiagon-web-content-onboarding) .jiagon-topbar-copy{padding:0!important}.jiagon-web-content:not(.jiagon-web-content-onboarding) .jiagon-topbar-title{font-size:clamp(42px,4.6vw,58px)!important;line-height:.9!important;letter-spacing:0!important}.jiagon-web-content:not(.jiagon-web-content-onboarding) .jiagon-topbar-sub{margin-top:8px!important;font-size:10px!important}.jiagon-web-nav{gap:6px!important}.jiagon-web-nav-item{padding:12px!important}.jiagon-web-nav-item[data-active="true"]{background:oklch(0.992 0.004 100)!important;border-color:color-mix(in oklch,var(--verified) 24%,var(--rule))!important}.jiagon-web-status{background:oklch(0.992 0.004 100 / .82)!important;padding:12px!important}.jiagon-web-status-grid{gap:4px!important;margin-top:8px!important}.jiagon-web-status-grid div{padding:5px 0!important}.jiagon-web-status p{font-size:11.5px!important;line-height:1.35!important;margin-top:8px!important}.jiagon-web-primary{box-shadow:0 8px 22px rgba(0,96,48,.16)}.jiagon-credit-screen{height:auto!important;overflow:visible!important;background:transparent!important;display:grid!important;grid-template-columns:minmax(0,1fr) minmax(330px,380px)!important;gap:14px!important;align-items:start!important}.jiagon-credit-screen .jiagon-topbar{grid-column:1/-1}.jiagon-credit-panel-wrap{padding:0!important;min-width:0}.jiagon-credit-panel-wrap>div{border-radius:10px!important}.jiagon-credit-panel-wrap button{border-radius:10px!important}.jiagon-credit-passport-wrap{grid-column:1/-1}.jiagon-credit-next-wrap,.jiagon-credit-solayer-wrap{grid-column:1}.jiagon-credit-draw-wrap{grid-column:2}.jiagon-credit-draw-wrap-unlocked{grid-column:1/-1}@media(max-height:980px) and (min-width:901px){.jiagon-web-sidebar{gap:12px!important}.jiagon-web-brand{padding-bottom:6px!important}.jiagon-web-status{display:none!important}.jiagon-web-nav-item{padding:10px 12px!important}}@media(max-width:1100px){.jiagon-credit-screen{grid-template-columns:1fr!important}.jiagon-credit-passport-wrap,.jiagon-credit-next-wrap,.jiagon-credit-solayer-wrap,.jiagon-credit-draw-wrap{grid-column:1/-1!important}}@media(max-width:900px){.jiagon-web-shell{grid-template-columns:1fr!important;height:auto!important;min-height:100vh!important;overflow:visible!important}.jiagon-web-sidebar{height:auto!important;min-height:auto!important;position:relative!important;overflow:visible!important}.jiagon-web-main{padding:16px 14px 30px!important;height:auto!important;min-height:78vh!important;overflow:visible!important}.jiagon-web-top{display:grid!important}.jiagon-web-content:not(.jiagon-web-content-onboarding)>div>div:first-child{padding-top:0!important}}
-`;
-
-const webDialogStyles = `
-.jiagon-web-modal-root-active{position:fixed!important;inset:0!important;z-index:1000!important;pointer-events:auto!important;background:rgba(24,32,26,.28)!important;backdrop-filter:blur(8px);display:grid!important;place-items:center!important;padding:36px!important}.jiagon-web-modal-root-active .screen{position:relative!important;inset:auto!important;width:min(920px,calc(100vw - 72px))!important;height:min(820px,calc(100vh - 72px))!important;max-width:none!important;margin:0!important;border-radius:12px!important}.jiagon-web-modal-close{position:fixed;top:18px;right:18px;z-index:1100;border:.5px solid var(--rule);border-radius:999px;background:var(--receipt);color:var(--ink);min-height:38px;padding:0 14px;font-family:var(--ui);font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 10px 28px rgba(24,24,24,.14)}.jiagon-web-modal-close:hover{background:var(--verified-soft)}@media(max-width:900px){.jiagon-web-modal-root-active{padding:12px!important;place-items:stretch!important}.jiagon-web-modal-root-active .screen{width:100%!important;height:calc(100vh - 24px)!important}.jiagon-web-modal-close{top:18px;right:18px}}
-`;
-
-const passportStyles = `
-.jiagon-passport-screen{display:grid;gap:16px}.jiagon-passport-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:18px;align-items:end}.jiagon-passport-hero h1{max-width:720px;margin:8px 0 0;font-family:var(--display);font-style:italic;font-weight:400;font-size:clamp(52px,6vw,78px);line-height:.9;color:var(--ink)}.jiagon-passport-hero p{max-width:650px;margin:14px 0 0;color:var(--ink-muted);font-size:15px;line-height:1.55}.jiagon-passport-summary{display:grid;grid-template-columns:1fr 1fr;border:.5px solid var(--rule);border-radius:12px;overflow:hidden;background:oklch(0.992 0.004 100 / .86);box-shadow:0 18px 54px rgba(24,58,38,.08)}.jiagon-passport-summary div{display:grid;gap:5px;padding:14px;border-right:.5px solid var(--rule);border-bottom:.5px solid var(--rule)}.jiagon-passport-summary div:nth-child(2n){border-right:none}.jiagon-passport-summary div:nth-last-child(-n+2){border-bottom:none}.jiagon-passport-summary span,.jiagon-passport-row span,.jiagon-passport-owner span{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-muted)}.jiagon-passport-summary strong{font-family:var(--display);font-style:italic;font-size:28px;font-weight:400;line-height:1;color:var(--ink)}.jiagon-passport-actions{display:flex;flex-wrap:wrap;gap:10px}.jiagon-passport-actions button{min-height:42px;border:.5px solid var(--rule);border-radius:10px;background:var(--receipt);color:var(--ink);padding:0 14px;font-weight:850;cursor:pointer}.jiagon-passport-actions button:first-child{border-color:transparent;background:var(--verified);color:var(--panel-text);box-shadow:0 8px 22px rgba(0,96,48,.14)}.jiagon-passport-owner{display:grid;gap:6px;max-width:640px}.jiagon-passport-owner input{width:100%;min-height:42px;border:.5px solid var(--rule);border-radius:10px;background:var(--receipt);color:var(--ink);padding:0 12px;font-family:var(--mono);font-size:12px;outline:none}.jiagon-passport-error{border:.5px solid oklch(0.76 .08 32);border-radius:8px;background:oklch(0.96 .03 42);color:oklch(0.38 .08 36);padding:10px 12px;font-size:13px;font-weight:750}.jiagon-passport-list{display:grid;gap:10px}.jiagon-passport-empty,.jiagon-passport-row{border:.5px solid var(--rule);border-radius:12px;background:oklch(0.992 0.004 100 / .84);box-shadow:0 14px 42px rgba(24,58,38,.06)}.jiagon-passport-empty{padding:26px}.jiagon-passport-empty h2{margin:8px 0 0;font-family:var(--display);font-style:italic;font-weight:400;font-size:42px;line-height:.95}.jiagon-passport-empty p{max-width:560px;margin:10px 0 0;color:var(--ink-muted);font-size:14px;line-height:1.5}.jiagon-passport-row{display:grid;grid-template-columns:minmax(0,1.5fr) repeat(3,minmax(112px,.5fr)) minmax(110px,.45fr);gap:12px;align-items:center;padding:14px}.jiagon-passport-row>div:not(:first-child){display:grid;gap:5px}.jiagon-passport-row strong{font-size:14px;color:var(--ink)}.jiagon-passport-row-title{font-family:var(--display);font-style:italic;font-size:28px;line-height:.95;color:var(--ink)}.jiagon-passport-row-sub{margin-top:6px;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.65px;color:var(--ink-muted)}.jiagon-passport-row-action button{min-height:38px;border:none;border-radius:9px;background:var(--verified);color:var(--panel-text);font-size:13px;font-weight:850;cursor:pointer}.jiagon-passport-row-action button:disabled{opacity:.55;cursor:not-allowed}@media(max-width:1100px){.jiagon-passport-hero,.jiagon-passport-row{grid-template-columns:1fr}.jiagon-passport-summary{grid-template-columns:1fr 1fr}}@media(max-width:560px){.jiagon-passport-summary{grid-template-columns:1fr}.jiagon-passport-summary div{border-right:none}.jiagon-passport-summary div:nth-last-child(-n+2){border-bottom:.5px solid var(--rule)}.jiagon-passport-summary div:last-child{border-bottom:none}}
-`;
-
-const passportFlowStyles = `
-.jiagon-passport-flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.jiagon-passport-flow-step{border:.5px solid var(--rule);border-radius:10px;background:var(--receipt);padding:12px;display:grid;gap:5px;min-width:0}.jiagon-passport-flow-step[data-state="active"]{background:var(--verified-soft);border-color:color-mix(in oklch,var(--verified) 28%,var(--rule))}.jiagon-passport-flow-step[data-state="locked"]{opacity:.64}.jiagon-passport-flow-step span{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.65px;color:var(--ink-muted)}.jiagon-passport-flow-step strong{font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:560px){.jiagon-passport-flow{grid-template-columns:1fr}}
-`;
-
-function WebNav({
-  active,
-  onChange,
-  onImport,
-  onConnect,
-  onSignup,
-  onLogout,
-  authenticated,
-  authReady,
-  receiptCount,
-  credentialCount,
-}: {
-  active: Tab;
-  onChange: (tab: Tab) => void;
-  onImport: () => void;
-  onConnect: () => void;
-  onSignup: () => void;
-  onLogout: () => void;
-  authenticated: boolean;
-  authReady: boolean;
-  receiptCount: number;
-  credentialCount: number;
-}) {
+function JiagonMark() {
   return (
-    <aside className="jiagon-web-sidebar">
-      <div className="jiagon-web-brand">
-        <img className="jiagon-logo-mark jiagon-logo-mark-sidebar" src="/jiagon-logo-mark.png" alt="" aria-hidden="true" />
-        <div>
-          <div className="jiagon-web-wordmark">Jiagon</div>
-          <div className="jiagon-web-kicker">Receipt-backed credit</div>
-        </div>
-      </div>
-
-      {authenticated ? (
-        <div className="jiagon-web-session-actions">
-          <button className="jiagon-web-primary" onClick={onImport} disabled={!authReady}>
-            Scan spend tx
-          </button>
-          <button className="jiagon-web-auth-button" onClick={onLogout} disabled={!authReady}>
-            Log out
-          </button>
-        </div>
-      ) : (
-        <div className="jiagon-web-auth-actions" aria-label="Privy authentication">
-          <button className="jiagon-web-auth-button jiagon-web-auth-button-primary" onClick={onConnect} disabled={!authReady}>
-            {authReady ? "Log in" : "Loading"}
-          </button>
-          <button className="jiagon-web-auth-button" onClick={onSignup} disabled={!authReady}>
-            Sign up
-          </button>
-        </div>
-      )}
-
-      <nav className="jiagon-web-nav" aria-label="Jiagon sections">
-        {webTabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="jiagon-web-nav-item"
-            data-active={active === item.id ? "true" : undefined}
-            onClick={() => onChange(item.id)}
-          >
-            <span>{item.label}</span>
-            <small>{item.sub}</small>
-          </button>
-        ))}
-      </nav>
-
-      <div className="jiagon-web-status">
-        <div className="jiagon-web-kicker">MVP status</div>
-        <div className="jiagon-web-status-grid">
-          <div>
-            <span>Auth</span>
-            <strong>{authenticated ? "Connected" : "Log in or sign up"}</strong>
-          </div>
-          <div>
-            <span>Receipts</span>
-            <strong>{receiptCount}</strong>
-          </div>
-          <div>
-            <span>Credentials</span>
-            <strong>{credentialCount}</strong>
-          </div>
-        </div>
-        <p>Scan a real spend proof first. Credit unlocks only after receipt proof becomes credential state.</p>
-      </div>
-    </aside>
+    <div className="home-mark" aria-label="Jiagon">
+      <span>J</span>
+      <i />
+      <b>✓</b>
+    </div>
   );
 }
 
-function PassportScreen({
-  auth,
-  merchantReceipts,
-  receiptCredentials,
-  onClaim,
-  onScan,
-  onMint,
-}: {
-  auth: AuthState;
-  merchantReceipts: MerchantPassportReceipt[];
-  receiptCredentials: Record<string, ReceiptCredential>;
-  onClaim: () => void;
-  onScan: () => void;
-  onMint: (receipt: MerchantPassportReceipt, solanaOwner: string) => Promise<void>;
-}) {
-  const [solanaOwner, setSolanaOwner] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return window.localStorage.getItem("jiagon:solana-owner") || "";
-  });
-  const [mintingReceiptId, setMintingReceiptId] = useState<string | null>(null);
-  const [mintError, setMintError] = useState("");
-  const credentialCount = Object.keys(receiptCredentials).length;
-  const verifiedSpend = merchantReceipts.reduce((sum, receipt) => sum + Number(receipt.amountUsd || 0), 0);
-  const credentialReadyReceipts = merchantReceipts.filter((receipt) => receipt.mintStatus === "prepared" || receipt.mintStatus === "minted");
-  const readyToMintReceipts = merchantReceipts.filter((receipt) => receipt.status === "claimed" && receipt.mintStatus !== "prepared" && receipt.mintStatus !== "minted");
-  const preparedOnlyReceipts = credentialReadyReceipts.filter((receipt) => receipt.mintStatus === "prepared" && !receipt.creditImpact?.eligible);
-  const creditEligibleReceipts = credentialReadyReceipts.filter((receipt) => receipt.creditImpact?.eligible);
-  const creditUnlocked = creditEligibleReceipts.length > 0;
-  const unlockedCreditUsd = creditUnlocked
-    ? Math.max(...creditEligibleReceipts.map((receipt) => receipt.creditImpact?.unlockedCreditUsd || 25), 25)
-    : 0;
-  const flowState = merchantReceipts.length === 0 ? "claim" : creditUnlocked ? "credit" : "mint";
-
-  const mintReceipt = async (receipt: MerchantPassportReceipt) => {
-    setMintError("");
-    setMintingReceiptId(receipt.id);
-    try {
-      window.localStorage.setItem("jiagon:solana-owner", solanaOwner.trim());
-      await onMint(receipt, solanaOwner.trim());
-    } catch (error) {
-      setMintError(error instanceof Error ? error.message : "Unable to mint receipt credential.");
-    } finally {
-      setMintingReceiptId(null);
-    }
-  };
-
-  return (
-    <section className="jiagon-passport-screen">
-      <div className="jiagon-passport-hero">
-        <div>
-          <div className="jiagon-web-kicker">Receipt passport</div>
-          <h1>Your receipts, usable for credit.</h1>
-          <p>
-            Claim merchant-issued receipts into a wallet-bound passport. Minting turns the private receipt into a
-            portable on-chain credential.
-          </p>
-        </div>
-        <div className="jiagon-passport-summary">
-          <div>
-            <span>Claimed receipts</span>
-            <strong>{merchantReceipts.length}</strong>
-          </div>
-          <div>
-            <span>Verified spend</span>
-            <strong>${verifiedSpend.toFixed(2)}</strong>
-          </div>
-          <div>
-            <span>Credentials</span>
-            <strong>{credentialCount + credentialReadyReceipts.length}</strong>
-          </div>
-          <div>
-            <span>Credit</span>
-            <strong>{creditUnlocked ? `$${unlockedCreditUsd} unlocked` : preparedOnlyReceipts.length > 0 ? "Real mint required" : readyToMintReceipts.length > 0 ? "Mint required" : "Locked"}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div className="jiagon-passport-actions">
-        <button type="button" onClick={onClaim}>Open merchant issuer</button>
-        <button type="button" onClick={onScan}>Scan tx proof</button>
-      </div>
-
-      <label className="jiagon-passport-owner">
-        <span>Solana receipt owner</span>
-        <input
-          value={solanaOwner}
-          onChange={(event) => setSolanaOwner(event.target.value)}
-          placeholder="Paste Solana wallet public key"
-        />
-      </label>
-      {mintError && <div className="jiagon-passport-error">{mintError}</div>}
-
-      <div className="jiagon-passport-flow">
-        {[
-          ["Claim receipt", merchantReceipts.length > 0 ? "done" : "active", merchantReceipts.length > 0 ? `${merchantReceipts.length} claimed` : "issue or claim one"],
-          [
-            "Mint cNFT",
-            flowState === "credit" ? "done" : flowState === "mint" ? "active" : "locked",
-            creditUnlocked
-              ? `${creditEligibleReceipts.length} minted`
-              : preparedOnlyReceipts.length > 0
-                ? "prepared only"
-                : "required before credit",
-          ],
-          ["Unlock credit", flowState === "credit" ? "active" : "locked", creditUnlocked ? `$${unlockedCreditUsd} ready` : "after credential"],
-        ].map(([label, state, detail]) => (
-          <div className="jiagon-passport-flow-step" data-state={state} key={label}>
-            <span>{label}</span>
-            <strong>{detail}</strong>
-          </div>
-        ))}
-      </div>
-
-      <div className="jiagon-passport-list">
-        {merchantReceipts.length === 0 ? (
-          <div className="jiagon-passport-empty">
-            <div className="jiagon-web-kicker">No receipt passport entries</div>
-            <h2>{auth.authenticated ? "Issue and claim a receipt first." : "Log in, then claim a merchant receipt."}</h2>
-            <p>For the Consensus demo, open `/merchant`, issue a cafe receipt, then claim the generated link.</p>
-          </div>
-        ) : (
-          merchantReceipts.map((receipt) => (
-            <article className="jiagon-passport-row" key={receipt.id}>
-              <div>
-                <div className="jiagon-passport-row-title">{receipt.merchantName}</div>
-                <div className="jiagon-passport-row-sub">
-                  {receipt.category || "Merchant"} · {receipt.location || "Local"} · {receipt.receiptNumber}
-                </div>
-              </div>
-              <div>
-                <span>Amount</span>
-                <strong>${receipt.amountUsd}</strong>
-              </div>
-              <div>
-                <span>Status</span>
-                <strong>{receipt.mintStatus === "minted" ? "Minted" : receipt.mintStatus === "prepared" ? "Prepared only" : "Ready to mint"}</strong>
-              </div>
-              <div>
-                <span>Credit impact</span>
-                <strong>{receipt.creditImpact?.eligible ? `+$${receipt.creditImpact.unlockedCreditUsd || 25}` : receipt.mintStatus === "prepared" ? "Real mint required" : "Mint required"}</strong>
-              </div>
-              <div className="jiagon-passport-row-action">
-                <button
-                  type="button"
-                  disabled={!auth.authenticated || !solanaOwner.trim() || mintingReceiptId === receipt.id || receipt.mintStatus === "minted"}
-                  onClick={() => mintReceipt(receipt)}
-                >
-                  {mintingReceiptId === receipt.id
-                    ? "Minting..."
-                    : receipt.mintStatus === "minted"
-                      ? "Minted"
-                      : receipt.mintStatus === "prepared"
-                        ? "Retry real mint"
-                        : "Mint cNFT"}
-                </button>
-              </div>
-            </article>
-          ))
-        )}
-      </div>
-    </section>
-  );
-}
-
-function HomeShell({ privy }: { privy?: PrivyBridge | null }) {
-  const [mounted, setMounted] = useState(false);
-  const [tab, setTab] = useState<Tab>(initialTabFromPath);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [reviewing, setReviewing] = useState<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [detail, setDetail] = useState<any>(null);
-  const [showOnboard, setShowOnboard] = useState(false);
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authSession, setAuthSession] = useState<StoredSession | null>(null);
-  const [etherfiSync, setEtherfiSync] = useState<EtherfiSyncState>(emptyEtherfiSync);
-  const [solayerProofs, setSolayerProofs] = useState<SolayerCreditProof[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [publishedReviews, setPublishedReviews] = useState<any[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [publicReviews, setPublicReviews] = useState<any[]>([]);
-  const [reviewedReceiptIds, setReviewedReceiptIds] = useState<string[]>([]);
-  const [receiptCredentials, setReceiptCredentials] = useState<Record<string, ReceiptCredential>>({});
-  const [merchantReceipts, setMerchantReceipts] = useState<MerchantPassportReceipt[]>([]);
-  const [accountStateReady, setAccountStateReady] = useState(false);
-  const [accountStateUpdatedAt, setAccountStateUpdatedAt] = useState<string | null>(null);
-  const privyUserIdRef = useRef<string | null>(null);
-  const localHydratedUserRef = useRef<string | null>(null);
-  const etherfiScanKeyRef = useRef<string | null>(null);
-  const lastPersistableEtherfiSyncRef = useRef<EtherfiSyncState | null>(null);
-  const stageRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setMounted(true);
-
-    const stored = window.localStorage.getItem(authStorageKey);
-    if (stored) {
-      try {
-        const session = JSON.parse(stored) as StoredSession;
-        if (session.userLabel === "preview@jiagon.local" || session.walletLabel === "0xpreview") {
-          window.localStorage.removeItem(authStorageKey);
-        } else {
-          setAuthSession(session);
-        }
-      } catch {
-        window.localStorage.removeItem(authStorageKey);
-      }
-    }
-
-    if (!stored) {
-      window.localStorage.removeItem(accountUserStorageKey);
-    }
-  }, []);
-
-  const verifyStyle: VerifyStyle = "chip";
-  const density: Density = "comfy";
-  const dark = false;
-  const hasPrivyAppId = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
-
-  const clearAccountScopedState = () => {
-    etherfiScanKeyRef.current = null;
-    localHydratedUserRef.current = null;
-    lastPersistableEtherfiSyncRef.current = null;
-    setEtherfiSync(emptyEtherfiSync);
-    setSolayerProofs([]);
-    setPublishedReviews([]);
-    setReviewedReceiptIds([]);
-    setReceiptCredentials({});
-    setMerchantReceipts([]);
-    window.localStorage.removeItem(etherfiStorageKey);
-    window.localStorage.removeItem(solayerProofsStorageKey);
-    window.localStorage.removeItem(reviewsStorageKey);
-    window.localStorage.removeItem(reviewedReceiptsStorageKey);
-    window.localStorage.removeItem(receiptCredentialsStorageKey);
-    window.localStorage.removeItem(merchantReceiptsStorageKey);
-  };
-
-  useEffect(() => {
-    if (!mounted || !privy?.ready || !privy.authenticated) return;
-
-    const typedUser = privy.user as { id?: string } | null;
-    const privyUserId = typedUser?.id || null;
-    const previousPrivyUserId = privyUserIdRef.current;
-    const storedPrivyUserId = window.localStorage.getItem(accountUserStorageKey);
-    const accountChanged = Boolean(
-      (privyUserId && storedPrivyUserId !== privyUserId) ||
-      (privyUserId && previousPrivyUserId && privyUserId !== previousPrivyUserId),
-    );
-
-    if (accountChanged) {
-      clearAccountScopedState();
-      setAccountStateReady(false);
-      setAccountStateUpdatedAt(null);
-    }
-
-    privyUserIdRef.current = privyUserId;
-    if (privyUserId) {
-      if (!accountChanged && storedPrivyUserId === privyUserId && localHydratedUserRef.current !== privyUserId) {
-        hydrateLocalPrivateState(
-          setEtherfiSync,
-          setSolayerProofs,
-          setPublishedReviews,
-          setReviewedReceiptIds,
-          setReceiptCredentials,
-          setMerchantReceipts,
-        );
-        localHydratedUserRef.current = privyUserId;
-      }
-
-      window.localStorage.setItem(accountUserStorageKey, privyUserId);
-    }
-
-    const walletAddress = getPrimaryWallet(privy.user);
-    const session: StoredSession = {
-      userLabel: getUserLabel(privy.user, walletAddress),
-      walletLabel: shortAddress(walletAddress),
-      walletAddress,
-    };
-
-    setAuthSession(session);
-    window.localStorage.setItem(authStorageKey, JSON.stringify(session));
-  }, [mounted, privy?.authenticated, privy?.ready, privy?.user]);
-
-  useEffect(() => {
-    if (!mounted || !privy?.ready) return;
-    if (!privy.authenticated) {
-      setAccountStateReady(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    const hydrateAccountState = async () => {
-      const token = await privy.getAccessToken();
-      if (!token || cancelled) return;
-
-      const response = await fetch("/api/account/state", {
-        cache: "no-store",
-        headers: {
-          authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (cancelled) return;
-      if (!response.ok) {
-        setAccountStateReady(false);
-        return;
-      }
-
-      const payload = await response.json();
-      const state = payload?.state;
-
-      if (!state) {
-        setAccountStateUpdatedAt(payload?.updatedAt || null);
-        setAccountStateReady(true);
-        return;
-      }
-
-      const restoredEtherfiSync = normalizeRestoredEtherfiSync(state.etherfiSync);
-      if (restoredEtherfiSync) {
-        setEtherfiSync(restoredEtherfiSync);
-        writeStoredEtherfiSync(restoredEtherfiSync);
-      }
-
-      const restoredSolayerProofs = normalizeRestoredSolayerProofs(state.solayerProofs);
-      setSolayerProofs(restoredSolayerProofs);
-      writeStoredSolayerProofs(restoredSolayerProofs);
-
-      if (Array.isArray(state.publishedReviews)) {
-        setPublishedReviews(state.publishedReviews);
-        window.localStorage.setItem(reviewsStorageKey, JSON.stringify(state.publishedReviews));
-      }
-
-      if (Array.isArray(state.reviewedReceiptIds)) {
-        setReviewedReceiptIds(state.reviewedReceiptIds);
-        window.localStorage.setItem(reviewedReceiptsStorageKey, JSON.stringify(state.reviewedReceiptIds));
-      }
-
-      if (state.receiptCredentials && typeof state.receiptCredentials === "object" && !Array.isArray(state.receiptCredentials)) {
-        setReceiptCredentials(state.receiptCredentials);
-        window.localStorage.setItem(receiptCredentialsStorageKey, JSON.stringify(state.receiptCredentials));
-      }
-
-      const restoredMerchantReceipts = mergeRestoredMerchantReceipts(state.merchantReceipts);
-      setMerchantReceipts(restoredMerchantReceipts);
-      writeStoredMerchantReceipts(restoredMerchantReceipts);
-
-      setAccountStateUpdatedAt(payload?.updatedAt || null);
-      setAccountStateReady(true);
-    };
-
-    hydrateAccountState().catch(() => {
-      if (!cancelled) setAccountStateReady(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mounted, privy?.authenticated, privy?.getAccessToken, privy?.ready, privy?.user]);
-
-  useEffect(() => {
-    if (!mounted) return;
-
-    let cancelled = false;
-
-    const loadPublicReviews = async () => {
-      const response = await fetch("/api/receipts/reviews?limit=50", { cache: "no-store" });
-      if (!response.ok || cancelled) return;
-
-      const payload = await response.json();
-      const publicReviews = Array.isArray(payload?.reviews)
-        ? payload.reviews.map(toFeedReviewFromPublic)
-        : [];
-
-      if (publicReviews.length === 0 || cancelled) return;
-
-      setPublicReviews(publicReviews);
-    };
-
-    loadPublicReviews().catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mounted]);
-
-  useEffect(() => {
-    if (!mounted || !accountStateReady || !privy?.ready || !privy.authenticated) return;
-
-    const timeout = window.setTimeout(async () => {
-      const token = await privy.getAccessToken();
-      if (!token) return;
-      const persistableEtherfiSync = etherfiSync.status === "scanning"
-        ? lastPersistableEtherfiSyncRef.current || undefined
-        : etherfiSync;
-
-      await fetch("/api/account/state", {
-        method: "PUT",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          wallet: authSession?.walletAddress || null,
-          userLabel: authSession?.userLabel || authSession?.walletLabel || null,
-          ifUnmodifiedSince: accountStateUpdatedAt,
-          state: {
-            etherfiSync: persistableEtherfiSync,
-            solayerProofs,
-            publishedReviews,
-            reviewedReceiptIds,
-            receiptCredentials,
-            merchantReceipts,
-          },
-        }),
-      }).then(async (response) => {
-        if (response.status === 409) {
-          const payload = await response.json();
-          const state = payload?.state;
-          if (state) {
-            const restoredEtherfiSync = normalizeRestoredEtherfiSync(state.etherfiSync);
-            if (restoredEtherfiSync) {
-              setEtherfiSync(restoredEtherfiSync);
-              writeStoredEtherfiSync(restoredEtherfiSync);
-            }
-            const restoredSolayerProofs = normalizeRestoredSolayerProofs(state.solayerProofs);
-            setSolayerProofs(restoredSolayerProofs);
-            writeStoredSolayerProofs(restoredSolayerProofs);
-            if (Array.isArray(state.publishedReviews)) {
-              setPublishedReviews(state.publishedReviews);
-              window.localStorage.setItem(reviewsStorageKey, JSON.stringify(state.publishedReviews));
-            }
-            if (Array.isArray(state.reviewedReceiptIds)) {
-              setReviewedReceiptIds(state.reviewedReceiptIds);
-              window.localStorage.setItem(reviewedReceiptsStorageKey, JSON.stringify(state.reviewedReceiptIds));
-            }
-            if (state.receiptCredentials && typeof state.receiptCredentials === "object" && !Array.isArray(state.receiptCredentials)) {
-              setReceiptCredentials(state.receiptCredentials);
-              window.localStorage.setItem(receiptCredentialsStorageKey, JSON.stringify(state.receiptCredentials));
-            }
-            const restoredMerchantReceipts = mergeRestoredMerchantReceipts(state.merchantReceipts);
-            setMerchantReceipts(restoredMerchantReceipts);
-            writeStoredMerchantReceipts(restoredMerchantReceipts);
-          }
-          setAccountStateUpdatedAt(payload?.updatedAt || null);
-          return;
-        }
-
-        if (response.ok) {
-          const payload = await response.json();
-          setAccountStateUpdatedAt(payload?.updatedAt || null);
-        }
-      });
-    }, 800);
-
-    return () => window.clearTimeout(timeout);
-  }, [
-    accountStateReady,
-    accountStateUpdatedAt,
-    authSession?.userLabel,
-    authSession?.walletAddress,
-    authSession?.walletLabel,
-    etherfiSync,
-    merchantReceipts,
-    mounted,
-    privy?.authenticated,
-    privy?.getAccessToken,
-    privy?.ready,
-    publishedReviews,
-    receiptCredentials,
-    reviewedReceiptIds,
-    solayerProofs,
-  ]);
-
-  useEffect(() => {
-    if (etherfiSync.status === "scanning") return;
-    const normalized = normalizeRestoredEtherfiSync(etherfiSync);
-    if (normalized) lastPersistableEtherfiSyncRef.current = normalized;
-  }, [etherfiSync]);
-
-  const visibleReviews = mergeReviews(publishedReviews, publicReviews);
-
-  const mintMerchantReceipt = async (receipt: MerchantPassportReceipt, solanaOwner: string) => {
-    if (!privy?.authenticated) {
-      await auth.login();
-      return;
-    }
-    const token = await privy.getAccessToken();
-    if (!token) throw new Error("Privy access token is required.");
-
-    const response = await fetch("/api/solana/merchant-receipts/mint", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        receiptId: receipt.id,
-        receipt,
-        solanaOwner,
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload?.error || "Unable to mint merchant receipt cNFT.");
-
-    const nextReceipts = merchantReceipts.map((item) =>
-      item.id === receipt.id
-        ? {
-            ...item,
-            mintStatus: payload.status === "minted" ? "minted" : "prepared",
-            credentialId: payload.credentialId,
-            credentialChain: payload.credentialChain,
-            standard: payload.standard,
-            dataHash: payload.dataHash,
-            storageUri: payload.storageUri,
-            solanaOwner: payload.solanaOwner,
-            credentialTx: payload.credentialTx || null,
-            explorerUrl: payload.explorerUrl || null,
-            assetExplorerUrl: payload.assetExplorerUrl || null,
-            creditImpact: payload.creditImpact || item.creditImpact,
-          }
-        : item,
-    );
-    setMerchantReceipts(nextReceipts);
-    writeStoredMerchantReceipts(nextReceipts);
-  };
-
-  const auth: AuthState = {
-    ready: !authBusy,
-    authenticated: Boolean(authSession),
-    appConfigured: hasPrivyAppId,
-    accountKey: authSession?.walletAddress || authSession?.walletLabel || authSession?.userLabel,
-    userLabel: authSession?.userLabel,
-    walletLabel: authSession?.walletLabel,
-    login: async () => {
-      if (hasPrivyAppId) {
-        window.location.href = "/auth";
-        return;
-      }
-
-      setAuthBusy(false);
-    },
-    logout: async () => {
-      await privy?.logout();
-      setAuthSession(null);
-      setAuthBusy(false);
-      clearAccountScopedState();
-      window.localStorage.removeItem(authStorageKey);
-      window.localStorage.removeItem(accountUserStorageKey);
-      setAccountStateReady(false);
-      setAccountStateUpdatedAt(null);
-      privyUserIdRef.current = null;
-    },
-    getAccessToken: () => privy?.getAccessToken?.() ?? Promise.resolve(null),
-  };
-  const navAuthReady = hasPrivyAppId ? Boolean(privy?.ready) : true;
-
-  const scanEtherfiProof = async (proof: string) => {
-    const nextProof = proof.trim();
-    const isTx = /^0x[a-fA-F0-9]{64}$/.test(nextProof);
-    const queryKey = isTx ? "tx" : "safe";
-    const scanKey = `${queryKey}:${nextProof}:${Date.now()}`;
-    etherfiScanKeyRef.current = scanKey;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 30_000);
-    const toSyncState = (payload: EtherfiSpendPayload): EtherfiSyncState => ({
-      safe: payload.safe,
-      sourceTx: payload.sourceTx,
-      sourceTxBlock: payload.sourceTxBlock,
-      status: "synced",
-      receipts: payload.receipts || [],
-      totalSpendUsd: payload.totalSpendUsd,
-      count: payload.count,
-      scope: payload.scope,
-      lookbackBlocks: payload.lookbackBlocks,
-      fromBlock: payload.fromBlock,
-      toBlock: payload.toBlock,
-      scannedAt: new Date().toISOString(),
-    });
-
-    setEtherfiSync((current) => ({
-      ...current,
-      safe: isTx ? current.safe : nextProof,
-      sourceTx: isTx ? nextProof : current.sourceTx,
-      status: "scanning",
-      error: undefined,
-    }));
-
-    let payload;
-
-    try {
-      const initialScope = isTx ? "source" : "full";
-      const initialLimit = isTx ? 20 : 100;
-      const response = await fetch(`/api/etherfi/spends?${queryKey}=${encodeURIComponent(nextProof)}&limit=${initialLimit}&scope=${initialScope}`, {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      payload = await response.json();
-
-      if (!response.ok) {
-        const message = payload?.error || "Unable to scan ether.fi Cash spend events.";
-        if (etherfiScanKeyRef.current === scanKey) {
-          setEtherfiSync((current) => ({
-            ...current,
-            safe: isTx ? current.safe : nextProof,
-            sourceTx: isTx ? nextProof : current.sourceTx,
-            status: "error",
-            error: message,
-          }));
-        }
-        throw new Error(message);
-      }
-    } catch (error) {
-      const message =
-        error instanceof DOMException && error.name === "AbortError"
-          ? "Receipt scan timed out. Try again or add a smaller block window later."
-          : error instanceof Error
-            ? error.message
-            : "Unable to scan ether.fi Cash spend events.";
-
-      if (etherfiScanKeyRef.current === scanKey) {
-        setEtherfiSync((current) => ({
-          ...current,
-          safe: isTx ? current.safe : nextProof,
-          sourceTx: isTx ? nextProof : current.sourceTx,
-          status: "error",
-          error: message,
-        }));
-      }
-      throw new Error(message);
-    } finally {
-      window.clearTimeout(timeout);
-    }
-
-    const nextSync = toSyncState(payload);
-
-    if (etherfiScanKeyRef.current !== scanKey) return nextSync;
-
-    setEtherfiSync(nextSync);
-    writeStoredEtherfiSync(nextSync);
-
-    if (isTx) {
-      fetch(`/api/etherfi/spends?${queryKey}=${encodeURIComponent(nextProof)}&limit=100&scope=full`, {
-        cache: "no-store",
-      })
-        .then(async (response) => {
-          const fullPayload = await response.json();
-          if (!response.ok) return;
-          if (etherfiScanKeyRef.current !== scanKey) return;
-          const fullSync = toSyncState(fullPayload);
-          setEtherfiSync(fullSync);
-          writeStoredEtherfiSync(fullSync);
-        })
-        .catch(() => undefined);
-    }
-
-    return nextSync;
-  };
-
-  const etherfi = {
-    ...etherfiSync,
-    scan: scanEtherfiProof,
-  };
-
-  const uploadSolayerProof = async (proof: SolayerProofInput) => {
-    const signer = authSession?.walletAddress;
-
-    if (!signer) {
-      throw new Error("Wallet login is required before uploading Solayer proof.");
-    }
-
-    const ethereum = window.ethereum as EthereumProvider | undefined;
-    if (!ethereum) {
-      throw new Error("Wallet signature is required before uploading Solayer proof.");
-    }
-
-    const signature = await ethereum.request({
-      method: "personal_sign",
-      params: [buildSolayerProofMessage({ wallet: signer, proof }), signer],
-    });
-
-    if (typeof signature !== "string") {
-      throw new Error("Wallet did not return a valid Solayer proof signature.");
-    }
-
-    const response = await fetch("/api/solayer/proofs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        wallet: signer,
-        proof,
-        ownership: {
-          signer,
-          signature,
-        },
-      }),
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload?.error || "Unable to upload Solayer proof.");
-    }
-
-    const nextProofs = [payload, ...solayerProofs.filter((item) => item.id !== payload.id)].slice(0, 25);
-    setSolayerProofs(nextProofs);
-    writeStoredSolayerProofs(nextProofs);
-    return payload as SolayerCreditProof;
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const signReceiptPublish = async (review: any, receipt: any) => {
-    if (localDemoHosts.has(window.location.hostname)) return undefined;
-
-    const signer = authSession?.walletAddress;
-    const sourceTx = receipt.txFull || receipt.txHash;
-
-    if (!signer) {
-      throw new Error("Wallet login is required before minting a production receipt.");
-    }
-
-    if (!sourceTx || typeof receipt.logIndex !== "number") {
-      throw new Error("A verified ether.fi Spend transaction and log index are required before minting.");
-    }
-
-    const ethereum = window.ethereum as EthereumProvider | undefined;
-    if (!ethereum) {
-      throw new Error("Wallet signature is required before minting. Open Jiagon with the wallet used for the ether.fi Spend event.");
-    }
-
-    const message = buildReceiptPublishMessage({
-      sourceTx,
-      logIndex: receipt.logIndex,
-      provider: receipt.provider,
-      amount: receipt.amount,
-      amountUsd: receipt.amountUsd,
-      token: receipt.token,
-      reviewId: review.id,
-      merchant: review.merchant,
-      branch: review.branch,
-      rating: review.rating,
-      placeProvider: review.placeProvider,
-      googlePlaceId: review.googlePlaceId,
-      tags: review.tags,
-      visitType: review.visitType,
-      occasion: review.occasion,
-      valueRating: review.valueRating,
-      wouldReturn: review.wouldReturn,
-      bestFor: review.bestFor,
-      text: review.text,
-      wallet: signer,
-    });
-    const signature = await ethereum.request({
-      method: "personal_sign",
-      params: [message, signer],
-    });
-
-    if (typeof signature !== "string") {
-      throw new Error("Wallet did not return a valid receipt publish signature.");
-    }
-
-    return {
-      signer,
-      signature,
-    };
-  };
-
-  const postReceiptCredential = (path: string, review: any, receipt: any, ownership?: { signer: string; signature: string }) =>
-    fetch(path, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        owner: authSession?.walletAddress || authSession?.walletLabel || "privy-user",
-        receipt,
-        review,
-        ownership,
-      }),
-    });
-
-  const mintSolanaBubblegumReceipt = (review: any, receipt: any, ownership?: { signer: string; signature: string }) =>
-    fetch("/api/solana/receipts/mint", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        receipt,
-        review,
-        ownership,
-        solanaOwner: review.solanaOwner || receipt.solanaOwner,
-      }),
-    });
-
-  const signSolanaCreditMirror = async (credential: ReceiptCredential) => {
-    const signer = authSession?.walletAddress;
-
-    if (!signer) {
-      throw new Error("Wallet login is required before mirroring credit to Solana.");
-    }
-
-    if (!credential.sourceReceiptHash || !credential.solanaOwner) {
-      throw new Error("A verified receipt hash and Solana owner are required before credit mirroring.");
-    }
-
-    const ethereum = window.ethereum as EthereumProvider | undefined;
-    if (!ethereum) {
-      throw new Error("Wallet signature is required before mirroring credit to Solana.");
-    }
-
-    const signature = await ethereum.request({
-      method: "personal_sign",
-      params: [
-        buildSolanaOwnerLinkMessage({
-          sourceReceiptHash: credential.sourceReceiptHash,
-          solanaOwner: credential.solanaOwner,
-        }),
-        signer,
-      ],
-    });
-
-    if (typeof signature !== "string") {
-      throw new Error("Wallet did not return a valid Solana mirror signature.");
-    }
-
-    return {
-      signer,
-      signature,
-    };
-  };
-
-  const mirrorSolanaCredit = async (credential: ReceiptCredential) => {
-    if (!credential.sourceReceiptHash) {
-      throw new Error("A verified source receipt hash is required before Solana mirroring.");
-    }
-
-    const ownership = await signSolanaCreditMirror(credential);
-    const response = await fetch("/api/solana/credit/mirror", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        sourceReceiptHash: credential.sourceReceiptHash,
-        credential,
-        solanaOwner: credential.solanaOwner,
-        ownerSigner: ownership.signer,
-        ownerSignature: ownership.signature,
-        solayerProofs,
-      }),
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload?.error || "Unable to build Solana credit PDA mirror.");
-    }
-
-    return payload;
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mintReceiptCredential = async (review: any, receipt: any) => {
-    const ownership = await signReceiptPublish(review, receipt);
-    let response = await postReceiptCredential("/api/receipts/publish", review, receipt, ownership);
-    let payload = await response.json();
-
-    if (response.status === 403 && payload?.error === "App receipt publishing is disabled on this server.") {
-      response = await postReceiptCredential("/api/receipts/mint", review, receipt, ownership);
-      payload = await response.json();
-    }
-
-    if (!response.ok) {
-      throw new Error(payload?.error || "Unable to mint BNB testnet receipt credential.");
-    }
-
-    let bubblegumPayload: any = null;
-    let bubblegumError: string | null = null;
-
-    try {
-      const bubblegumResponse = await mintSolanaBubblegumReceipt(review, receipt, ownership);
-      const nextBubblegumPayload = await bubblegumResponse.json();
-      if (bubblegumResponse.ok) {
-        bubblegumPayload = nextBubblegumPayload;
-      } else {
-        bubblegumError = nextBubblegumPayload?.error || "Unable to mint Solana Bubblegum receipt cNFT.";
-      }
-    } catch (error) {
-      bubblegumError = error instanceof Error ? error.message : "Unable to mint Solana Bubblegum receipt cNFT.";
-    }
-
-    const primaryPayload = bubblegumPayload || payload;
-    const bubblegumMeta = bubblegumPayload || {};
-    const credential: ReceiptCredential = {
-      receiptId: receipt.id,
-      reviewId: review.id,
-      status: primaryPayload.status,
-      network: primaryPayload.network,
-      chainId: primaryPayload.chainId,
-      credentialChain: primaryPayload.credentialChain,
-      credentialId: primaryPayload.credentialId || primaryPayload.assetId || payload.credentialId,
-      preparedCredentialId: payload.preparedCredentialId,
-      credentialTx: primaryPayload.credentialTx,
-      explorerUrl: primaryPayload.explorerUrl,
-      assetExplorerUrl: primaryPayload.assetExplorerUrl,
-      storageLayer: primaryPayload.storageLayer || "bubblegum-v2",
-      storageUri: primaryPayload.storageUri,
-      requestedStorageUri: payload.requestedStorageUri,
-      sourceReceiptHash: primaryPayload.sourceReceiptHash || payload.sourceReceiptHash,
-      dataHash: primaryPayload.dataHash || payload.dataHash,
-      requestedDataHash: payload.requestedDataHash,
-      dataMatchesRequest: typeof payload.dataMatchesRequest === "boolean" ? payload.dataMatchesRequest : true,
-      proofLevel: primaryPayload.proofLevel || payload.proofLevel,
-      mode: primaryPayload.mode || payload.mode,
-      mintedAt: primaryPayload.mintedAt || primaryPayload.preparedAt || payload.mintedAt || payload.preparedAt || new Date().toISOString(),
-      preparedAt: primaryPayload.preparedAt || payload.preparedAt,
-      minter: primaryPayload.minter || payload.minter,
-      note: primaryPayload.note || payload.note,
-      persistence: payload.persistence,
-      onchain: payload.onchain,
-      solanaOwner: primaryPayload.solanaOwner || payload.solanaOwner || receipt.solanaOwner || review.solanaOwner,
-      metaplexCoreAsset:
-        primaryPayload.metaplexCoreAsset ||
-        primaryPayload.assetId ||
-        bubblegumMeta.metaplexCoreAsset ||
-        bubblegumMeta.assetId,
-      merkleTree:
-        primaryPayload.merkleTree ||
-        bubblegumMeta.merkleTree ||
-        bubblegumMeta.metaplexBubblegum?.tree,
-      standard: primaryPayload.standard || bubblegumMeta.standard,
-    };
-    credential.solana = {
-      ...(credential.solana || {}),
-      bubblegum:
-        bubblegumPayload || {
-          status: "not-minted",
-          error: bubblegumError || "Solana Bubblegum receipt cNFT was not minted.",
-        },
-      originCredential: payload.status
-        ? {
-            chain: payload.credentialChain,
-            status: payload.status,
-            credentialId: payload.credentialId,
-            credentialTx: payload.credentialTx,
-          }
-        : null,
-    };
-
-    if (credential.status === "minted" && credential.solanaOwner) {
-      try {
-        credential.solana = {
-          ...credential.solana,
-          mirror: await mirrorSolanaCredit(credential),
-        };
-      } catch (error) {
-        credential.solana = {
-          ...credential.solana,
-          mirror: {
-            status: "adapter-error",
-            error: error instanceof Error ? error.message : "Unable to build Solana credit PDA mirror.",
-          },
-          error: error instanceof Error ? error.message : "Unable to build Solana credit PDA mirror.",
-        };
-      }
-    } else if (!credential.solanaOwner) {
-      credential.solana = {
-        ...credential.solana,
-        status: "solana-owner-required",
-        error: "Connect a Solana wallet before mirroring this receipt into a credit PDA.",
-      };
-    } else {
-      credential.solana = {
-        ...credential.solana,
-        status: "mint-required",
-        error: "Solana mirroring is available after the receipt credential is minted.",
-      };
-    }
-
-    return credential;
-  };
-
-  const refreshSolanaCreditMirror = async () => {
-    const credential = Object.values(receiptCredentials)
-      .slice()
-      .reverse()
-      .find((item) => item?.status === "minted" && item?.sourceReceiptHash && item?.solanaOwner);
-
-    if (!credential) {
-      throw new Error("Mint a receipt credential with a Solana owner before refreshing the credit mirror.");
-    }
-
-    const solana = await mirrorSolanaCredit(credential);
-    const nextCredentials = {
-      ...receiptCredentials,
-      [credential.receiptId]: {
-        ...credential,
-        solana,
-      },
-    };
-
-    setReceiptCredentials(nextCredentials);
-    window.localStorage.setItem(receiptCredentialsStorageKey, JSON.stringify(nextCredentials));
-    return solana;
-  };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const publishReview = async (review: any, receipt: any) => {
-    const credential = await mintReceiptCredential(review, receipt);
-    const agentSignals = {
-      visitType: review.visitType || null,
-      occasion: review.occasion || null,
-      valueRating: review.valueRating || null,
-      wouldReturn: typeof review.wouldReturn === "boolean" ? review.wouldReturn : null,
-      bestFor: Array.isArray(review.bestFor) ? review.bestFor : [],
-    };
-    const reviewWithCredential = {
-      ...review,
-      agentSignals,
-      proofBoundary,
-      credential,
-      proofLevel:
-        credential.status === "minted"
-          ? credential.standard === "bubblegum-v2-cnft"
-            ? "A+C · Bubblegum cNFT"
-            : credential.mode === "already-minted"
-            ? `${credential.proofLevel} · BNB existing`
-            : `${credential.proofLevel} · BNB minted`
-          : `${credential.proofLevel} · prepared`,
-      credentialTx: credential.credentialTx
-        ? `${credential.credentialTx.slice(0, 6)}…${credential.credentialTx.slice(-4)}`
-        : credential.credentialId,
-      storageLayer: credential.storageLayer,
-      credentialMode: credential.mode,
-      dataMatchesRequest: credential.dataMatchesRequest,
-    };
-    const nextReviews = [reviewWithCredential, ...publishedReviews.filter((item) => item.id !== review.id)];
-    const nextReviewedReceiptIds = Array.from(new Set([review.receiptId, ...reviewedReceiptIds]));
-    const nextCredentials = {
-      ...receiptCredentials,
-      [receipt.id]: credential,
-    };
-
-    setPublishedReviews(nextReviews);
-    setReviewedReceiptIds(nextReviewedReceiptIds);
-    setReceiptCredentials(nextCredentials);
-    window.localStorage.setItem(reviewsStorageKey, JSON.stringify(nextReviews));
-    window.localStorage.setItem(reviewedReceiptsStorageKey, JSON.stringify(nextReviewedReceiptIds));
-    window.localStorage.setItem(receiptCredentialsStorageKey, JSON.stringify(nextCredentials));
-    setTab("credit");
-    return credential;
-  };
-
-  // Apply theme + accent
-  useEffect(() => {
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
-  }, [dark]);
-
-  useEffect(() => {
-    if (!mounted) return;
-
-    const syncFromPath = () => {
-      const nextTab = initialTabFromPath();
-      setTab(nextTab);
-      setShowOnboard(false);
-    };
-
-    window.addEventListener("popstate", syncFromPath);
-    return () => window.removeEventListener("popstate", syncFromPath);
-  }, [mounted]);
-
-  useEffect(() => {
-    if (!mounted) return;
-
-    const nextPath = showOnboard ? "/" : pathForTab(tab);
-    if (window.location.pathname !== nextPath) {
-      window.history.replaceState(null, "", nextPath);
-    }
-  }, [mounted, showOnboard, tab]);
-
-  useEffect(() => {
-    if (!detail && !reviewing) return;
-
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setDetail(null);
-      setReviewing(null);
-    };
-
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [detail, reviewing]);
-
-  const tabContent: Record<Tab, React.ReactNode> = {
-    passport: (
-      <PassportScreen
-        auth={auth}
-        merchantReceipts={merchantReceipts}
-        receiptCredentials={receiptCredentials}
-        onClaim={() => {
-          window.location.href = "/merchant";
-        }}
-        onScan={() => {
-          setShowOnboard(false);
-          setTab("inbox");
-        }}
-        onMint={mintMerchantReceipt}
-      />
-    ),
-    feed: (
-      <FeedScreen
-        onOpenReview={(r: unknown) => setDetail(r)}
-        density={density}
-        verifyStyle={verifyStyle}
-        userReviews={visibleReviews}
-      />
-    ),
-    inbox: (
-      <InboxScreen
-        onOpenReceipt={(r: unknown) => setReviewing(r)}
-        auth={auth}
-        etherfi={etherfi}
-        reviewedReceiptIds={reviewedReceiptIds}
-        receiptCredentials={receiptCredentials}
-      />
-    ),
-    credit: (
-      <CreditScreen
-        auth={auth}
-        etherfi={etherfi}
-        userReviews={publishedReviews}
-        reviewedReceiptIds={reviewedReceiptIds}
-        receiptCredentials={receiptCredentials}
-        merchantReceipts={merchantReceipts}
-        solayerProofs={solayerProofs}
-        onUploadSolayer={uploadSolayerProof}
-        onRefreshSolana={refreshSolanaCreditMirror}
-        onOpenPassport={() => {
-          setShowOnboard(false);
-          setTab("passport");
-        }}
-        onScan={() => {
-          setShowOnboard(false);
-          setTab("inbox");
-        }}
-      />
-    ),
-    profile: <ProfileScreen verifyStyle={verifyStyle} auth={auth} etherfi={etherfi} userReviews={visibleReviews} receiptCredentials={receiptCredentials} />,
-  };
-  const credentialCount = Object.keys(receiptCredentials).length;
-  const activeContent = showOnboard ? (
-    <OnboardingScreen
-      auth={auth}
-      etherfi={etherfi}
-      onDone={() => { setShowOnboard(false); setTab("feed"); }}
-      onImportDone={() => { setShowOnboard(false); setTab("inbox"); }}
-    />
-  ) : tabContent[tab];
-
-  return (
-    <>
-      <style>{webShellStyles + logoMarkStyles + webUiPolishStyles + webDialogStyles + passportStyles + passportFlowStyles}</style>
-      <div className="jiagon-web-shell" ref={stageRef} suppressHydrationWarning>
-        {mounted && (
-          <>
-            <WebNav
-              active={showOnboard ? "inbox" : tab}
-              onChange={(nextTab) => {
-                setShowOnboard(false);
-                setTab(nextTab);
-              }}
-              onImport={() => {
-                setShowOnboard(false);
-                setTab("inbox");
-              }}
-              onConnect={() => {
-                auth.login();
-              }}
-              onSignup={() => {
-                auth.login();
-              }}
-              onLogout={() => {
-                auth.logout();
-              }}
-              authReady={navAuthReady}
-              authenticated={auth.authenticated}
-              receiptCount={(etherfi.receipts?.length || 0) + merchantReceipts.length}
-              credentialCount={credentialCount}
-            />
-
-            <main className="jiagon-web-main">
-              <header className="jiagon-web-top">
-                <div>
-                  <div className="jiagon-web-kicker">JIAGON · RECEIPT CREDIT MVP · v0.2</div>
-                </div>
-                <div className="jiagon-web-proofline">
-                  <span>zkTLS-compatible adapter</span>
-                  <span>Metaplex Core</span>
-                  <span>Solana PDA</span>
-                </div>
-              </header>
-
-              <section className="jiagon-web-workspace">
-                <div className={`jiagon-web-content jiagon-web-content-${showOnboard ? "onboarding" : tab}`}>
-                  {activeContent}
-                </div>
-              </section>
-
-              {(detail || reviewing) && (
-              <div
-                className="jiagon-web-modal-root jiagon-web-modal-root-active"
-                onMouseDown={(event) => {
-                  if (event.target !== event.currentTarget) return;
-                  setDetail(null);
-                  setReviewing(null);
-                }}
-              >
-              <button
-                type="button"
-                className="jiagon-web-modal-close"
-                onClick={() => {
-                  setDetail(null);
-                  setReviewing(null);
-                }}
-              >
-                Close
-              </button>
-              {detail && (
-                <div className="screen modal-enter" style={{ zIndex: 30 }} onMouseDown={(event) => event.stopPropagation()}>
-                  <ReviewDetailScreen review={detail} onClose={() => setDetail(null)} verifyStyle={verifyStyle} />
-                </div>
-              )}
-
-              {reviewing && (
-                <div className="screen modal-enter" style={{ zIndex: 40 }} onMouseDown={(event) => event.stopPropagation()}>
-                  <WriteReviewScreen receipt={reviewing} onClose={() => setReviewing(null)} onSubmit={publishReview} />
-                </div>
-              )}
-              </div>
-              )}
-            </main>
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
-function PrivyHome() {
-  const privy = usePrivy();
-  return <HomeShell privy={privy} />;
+function StatusPill({ children }: { children: string }) {
+  return <span className="home-pill">{children}</span>;
 }
 
 export default function Home() {
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  if (!appId) return <HomeShell privy={null} />;
-
   return (
-    <PrivyProvider appId={appId} config={privyConfig}>
-      <PrivyHome />
-    </PrivyProvider>
+    <main className="home-shell">
+      <style>{`
+        .home-shell {
+          min-height: 100vh;
+          padding: 28px clamp(18px, 4vw, 56px) 56px;
+          background:
+            radial-gradient(circle at 18% 0%, oklch(0.98 0.008 105) 0 280px, transparent 420px),
+            linear-gradient(135deg, oklch(0.95 0.016 115) 0%, oklch(0.91 0.014 92) 58%, oklch(0.90 0.018 128) 100%);
+        }
+        .home-inner { max-width: 1380px; margin: 0 auto; }
+        .home-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+          margin-bottom: 42px;
+        }
+        .home-brand { display: flex; align-items: center; gap: 14px; }
+        .home-wordmark {
+          font-family: var(--display);
+          font-size: 42px;
+          line-height: .9;
+          color: var(--verified);
+        }
+        .home-sub, .home-kicker, .home-label {
+          font-family: var(--mono);
+          font-size: 10px;
+          letter-spacing: .9px;
+          text-transform: uppercase;
+          color: var(--ink-muted);
+        }
+        .home-sub { margin-top: 5px; }
+        .home-nav {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          padding: 6px;
+          border: .5px solid var(--rule);
+          border-radius: 8px;
+          background: oklch(0.985 0.005 95 / .72);
+          backdrop-filter: blur(16px);
+        }
+        .home-nav a {
+          min-height: 34px;
+          display: inline-flex;
+          align-items: center;
+          padding: 0 12px;
+          border-radius: 6px;
+          color: var(--ink-muted);
+          font-size: 13px;
+          font-weight: 700;
+          text-decoration: none;
+        }
+        .home-nav a:hover { background: var(--verified-soft); color: var(--verified); }
+        .home-hero {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
+          gap: 18px;
+          align-items: stretch;
+        }
+        .home-title {
+          max-width: 860px;
+          margin: 10px 0 0;
+          font-family: var(--display);
+          font-size: clamp(48px, 8vw, 98px);
+          line-height: .9;
+          font-weight: 400;
+          font-style: italic;
+          color: var(--ink);
+        }
+        .home-copy {
+          max-width: 720px;
+          margin: 18px 0 0;
+          color: var(--ink-muted);
+          font-size: 17px;
+          line-height: 1.55;
+        }
+        .home-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+        .home-button {
+          min-height: 44px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 16px;
+          border-radius: 8px;
+          border: .5px solid var(--verified);
+          background: var(--verified);
+          color: var(--panel-text);
+          font-weight: 800;
+          text-decoration: none;
+        }
+        .home-button.secondary { background: var(--surface); color: var(--ink); border-color: var(--rule); }
+        .home-card {
+          border: .5px solid var(--rule);
+          border-radius: 8px;
+          background: var(--receipt);
+          padding: 18px;
+          box-shadow: 0 1px 0 rgba(24,24,24,.05), 0 8px 24px rgba(24,24,24,.045);
+        }
+        .home-card.dark { background: var(--panel); color: var(--panel-text); border-color: oklch(0.34 0.03 135); }
+        .home-grid {
+          display: grid;
+          grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+          gap: 18px;
+          margin-top: 18px;
+        }
+        .home-panel-title {
+          margin: 8px 0 0;
+          font-family: var(--display);
+          font-style: italic;
+          font-weight: 400;
+          font-size: 34px;
+          line-height: .95;
+        }
+        .home-flow { display: grid; gap: 10px; margin-top: 16px; }
+        .home-step {
+          display: grid;
+          grid-template-columns: 42px 1fr;
+          gap: 12px;
+          padding: 12px;
+          border: .5px solid var(--rule);
+          border-radius: 8px;
+          background: oklch(0.985 0.005 95 / .64);
+        }
+        .home-step code {
+          font-family: var(--mono);
+          color: var(--verified);
+          font-size: 11px;
+        }
+        .home-step strong { display: block; font-size: 14px; }
+        .home-step span { display: block; color: var(--ink-muted); font-size: 13px; line-height: 1.4; margin-top: 3px; }
+        .home-code {
+          margin: 14px 0 0;
+          padding: 16px;
+          border-radius: 8px;
+          border: .5px solid oklch(0.38 0.03 135);
+          background: oklch(0.21 0.026 135);
+          color: var(--panel-text);
+          font-family: var(--mono);
+          font-size: 12px;
+          line-height: 1.7;
+          overflow: auto;
+          white-space: pre-wrap;
+        }
+        .home-pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+        .home-pill {
+          display: inline-flex;
+          align-items: center;
+          min-height: 28px;
+          padding: 0 9px;
+          border-radius: 6px;
+          border: .5px solid color-mix(in oklch, var(--verified) 34%, var(--rule));
+          background: var(--verified-soft);
+          color: var(--verified);
+          font-family: var(--mono);
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: .3px;
+          text-transform: uppercase;
+        }
+        .home-mark {
+          width: 56px;
+          height: 56px;
+          position: relative;
+          display: grid;
+          place-items: center;
+          flex: 0 0 auto;
+          border: 3px solid var(--verified);
+          border-radius: 10px;
+          background: var(--receipt);
+          color: var(--verified);
+          font-family: Georgia, serif;
+          font-size: 39px;
+          font-weight: 800;
+          line-height: .9;
+          box-shadow: 0 10px 24px rgba(24,58,38,.10);
+        }
+        .home-mark span { transform: translateY(-2px); }
+        .home-mark i {
+          position: absolute;
+          left: 14%;
+          right: 28%;
+          bottom: 13%;
+          border-bottom: 3px dotted var(--verified);
+        }
+        .home-mark b {
+          position: absolute;
+          top: 6%;
+          right: 5%;
+          width: 24%;
+          height: 24%;
+          display: grid;
+          place-items: center;
+          border-radius: 999px;
+          background: var(--ink);
+          color: var(--receipt);
+          font-family: var(--ui);
+          font-size: 10px;
+        }
+        @media (max-width: 920px) {
+          .home-top, .home-hero, .home-grid { grid-template-columns: 1fr; display: grid; }
+          .home-nav { justify-content: start; }
+        }
+      `}</style>
+      <div className="home-inner">
+        <header className="home-top">
+          <div className="home-brand">
+            <JiagonMark />
+            <div>
+              <div className="home-wordmark">Jiagon</div>
+              <div className="home-sub">Solana receipt-backed credit</div>
+            </div>
+          </div>
+          <nav className="home-nav" aria-label="Primary">
+            <Link href="/agent-order">Agent Order</Link>
+            <Link href="/merchant">Merchant</Link>
+            <Link href="/tile/raposa-coffee">NFC Station</Link>
+            <Link href="/passport">Passport</Link>
+            <Link href="/credit">Credit</Link>
+            <Link href="/api/agent">Agent API</Link>
+          </nav>
+        </header>
+
+        <section className="home-hero">
+          <div>
+            <div className="home-kicker">Agentic POS &rarr; Bubblegum receipt &rarr; purpose-bound credit</div>
+            <h1 className="home-title">Personal agents can order. Receipts unlock credit.</h1>
+            <p className="home-copy">
+              Jiagon lets a user&apos;s agent place a real merchant order, routes it into the
+              staff queue, mints the fulfilled receipt on Solana, and uses that receipt history
+              to unlock restaurant-deposit credit.
+            </p>
+            <div className="home-actions">
+              <Link className="home-button" href="/agent-order">Try agent order demo</Link>
+              <Link className="home-button" href="/merchant">Open staff queue</Link>
+              <Link className="home-button secondary" href="/tile/raposa-coffee">Open Raposa NFC station</Link>
+            </div>
+          </div>
+          <section className="home-card">
+            <div className="home-label">Live demo spine</div>
+            <div className="home-flow">
+              {flow.map(([id, title, body]) => (
+                <div className="home-step" key={id}>
+                  <code>{id}</code>
+                  <div>
+                    <strong>{title}</strong>
+                    <span>{body}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </section>
+
+        <section className="home-grid">
+          <section className="home-card dark">
+            <div className="home-label">Agent-callable order API</div>
+            <h2 className="home-panel-title">Use the API as the POS entry point.</h2>
+            <pre className="home-code">{demoCurl}</pre>
+          </section>
+          <section className="home-card">
+            <div className="home-label">Credit boundary</div>
+            <h2 className="home-panel-title">Credit is purpose-bound, not open cash.</h2>
+            <p className="home-copy">
+              The first lending use case is a restaurant deposit: amount-capped, recipient-bound,
+              category-bound, expiring, and backed by verified receipt history.
+            </p>
+            <div className="home-pill-row">
+              <StatusPill>Solana-first</StatusPill>
+              <StatusPill>Bubblegum cNFT</StatusPill>
+              <StatusPill>Receipt Passport</StatusPill>
+              <StatusPill>Credit PDA</StatusPill>
+              <StatusPill>Devnet USDC</StatusPill>
+            </div>
+          </section>
+        </section>
+      </div>
+    </main>
   );
 }

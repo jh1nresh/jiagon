@@ -8,10 +8,12 @@
     "start": "next start"
   },
   "dependencies": {
+    "@heliofi/checkout-react": "^4.0.8",
     "@metaplex-foundation/mpl-bubblegum": "^5.0.2",
     "@metaplex-foundation/umi": "^1.5.1",
     "@metaplex-foundation/umi-bundle-defaults": "^1.5.1",
     "@privy-io/react-auth": "^3.22.2",
+    "@solana-program/memo": "^0.11.0",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "bs58": "^6.0.0",
@@ -20,7 +22,7 @@
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "viem": "^2.48.4"
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

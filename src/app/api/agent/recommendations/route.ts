@@ -13,9 +13,9 @@ type RecommendationMerchant = {
 };
 
 const PROOF_BOUNDARY = {
-  payment: "verified",
-  merchant: "user_claimed",
-  review: "published_after_verified_payment",
+  payment: "optional_solana_pay",
+  merchant: "merchant_completed",
+  review: "published_after_customer_claim",
   recommendationUse: "ranking signal, not an official merchant fact",
 };
 
@@ -78,10 +78,10 @@ export async function GET(request: Request) {
     proofLevel: {
       payment: "A",
       merchant: "C",
-      source: "ether.fi Cash OP Spend event",
-      credentialChain: "BNB Smart Chain testnet",
-      storageLayer: "BNB Greenfield testnet pointer",
-      caveat: "Payment is onchain-verified; merchant identity is reviewer-claimed until an official card API or uploaded receipt verifies it.",
+      source: "Jiagon agentic POS receipt",
+      credentialChain: "Solana devnet Bubblegum",
+      storageLayer: "receipt metadata URI",
+      caveat: "Merchant completion and customer claim are verified by Jiagon; payment proof is optional until Solana Pay verification is configured.",
     },
     reasons: (() => {
       const signals = buildAgentSignals(merchant.latestAttributes);
@@ -117,16 +117,16 @@ export async function GET(request: Request) {
       error: persisted.error,
     },
     architecture: {
-      sourceChain: "optimism",
-      credentialChain: "bnb-testnet",
-      storageLayer: "greenfield-testnet",
-      flow: "OP Spend event -> Jiagon verification -> BNB testnet receipt credential -> Greenfield data object",
+      source: "agentic-pos-order",
+      credentialChain: "solana-devnet",
+      storageLayer: "receipt metadata URI",
+      flow: "Agent order -> merchant completion -> customer claim -> Bubblegum receipt cNFT",
     },
     proofLevels: {
-      A: "Onchain card spend event",
-      B: "BNB testnet receipt credential minted from verified payment and user-claimed merchant",
-      C: "User-claimed merchant on top of verified payment",
-      D: "Self-claimed review without payment proof",
+      A: "Solana payment plus merchant fulfillment plus customer claim",
+      B: "Bubblegum receipt cNFT minted from merchant-completed, customer-claimed receipt",
+      C: "Merchant-completed receipt claimed by customer",
+      D: "Order intent only",
     },
     recommendations,
   });

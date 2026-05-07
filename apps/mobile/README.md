@@ -11,10 +11,15 @@ pnpm install
 pnpm --filter @jiagon/mobile start
 ```
 
+`EXPO_PUBLIC_PRIVY_APP_ID` must be the Privy mobile app id. The mobile build
+does not fall back to `NEXT_PUBLIC_PRIVY_APP_ID`, so CI and local Android builds
+should fail setup visibly instead of silently bundling the web app id.
+
 Optional override:
 
 ```bash
 export EXPO_PUBLIC_JIAGON_API_BASE_URL='https://jiagon.vercel.app'
+export EXPO_PUBLIC_SOLANA_CLUSTER='devnet'
 ```
 
 ## Android Build Path

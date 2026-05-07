@@ -28,6 +28,12 @@ node_modules/
 # misc
 .DS_Store
 *.pem
+*.key
+*.keypair
+*.keystore
+*.jks
+*.p12
+*.pfx
 AGENTS.md
 CLAUDE.md
 .claude/
@@ -45,6 +51,38 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local secrets / generated keys
+*secret*
+*secrets*
+*private-key*
+*keypair*
+*minter*
+*.wallet.json
+id.json
+
+# Solana local/devnet operator state
+.anchor/
+.solana/
+test-ledger/
+ledger/
+
+# Expo / native mobile local output
+.expo/
+.expo-shared/
+apps/mobile/.expo/
+apps/mobile/.expo-shared/
+apps/mobile/android/
+apps/mobile/ios/
+*.mobileprovision
+*.xcuserstate
+*.apk
+*.aab
+*.ipa
+
+# local deployment state
+.vercel/
 
 # vercel
 .vercel

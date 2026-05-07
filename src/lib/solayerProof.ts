@@ -70,7 +70,7 @@ export function normalizeSolayerProofInput(input: SolayerProofInput) {
 
 export function solayerProofMessagePayload({ wallet, proof }: { wallet: string; proof: SolayerProofInput }) {
   return {
-    wallet: wallet.trim().toLowerCase(),
+    wallet: wallet.trim(),
     proof: normalizeSolayerProofInput(proof),
   };
 }
@@ -86,7 +86,7 @@ export function buildSolayerProofMessage({ wallet, proof }: { wallet: string; pr
 export function solayerProofSigningPayload(proof: Omit<SolayerCreditProof, "signedAdapter">) {
   return {
     id: proof.id,
-    owner: proof.owner.toLowerCase(),
+    owner: proof.owner,
     provider: proof.provider,
     account: proof.account,
     asset: proof.asset,

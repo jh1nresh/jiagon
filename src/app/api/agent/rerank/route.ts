@@ -15,11 +15,15 @@ type Candidate = {
 };
 
 const PROOF_BOUNDARY = {
-  payment: "verified",
-  merchant: "user_claimed",
-  review: "published_after_verified_payment",
+  payment: "optional_solana_pay",
+  merchant: "merchant_completed",
+  review: "published_after_customer_claim",
   recommendationUse: "reranking signal, not an official merchant fact",
 };
+
+function credentialChainLabel() {
+  return (process.env.SOLANA_CREDENTIAL_CHAIN || process.env.NEXT_PUBLIC_SOLANA_CREDENTIAL_CHAIN || "Solana devnet Bubblegum").trim();
+}
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
@@ -143,16 +147,16 @@ export async function POST(request: Request) {
               matched: true,
               matchType: signalMatchType,
               placeLinkProof: signal.googlePlaceId ? "user_claimed_place_id" : null,
-              payment: "A",
-              merchant: "C",
-              credentialChain: "BNB Smart Chain testnet",
+              payment: PROOF_BOUNDARY.payment,
+              merchant: PROOF_BOUNDARY.merchant,
+              credentialChain: credentialChainLabel(),
               verifiedVisits: signal.verifiedVisits,
               verifiedWallets: signal.verifiedWallets,
               averageRating: signal.averageRating,
               lastVerifiedVisit: signal.lastVerifiedVisit,
               latestReview: signal.latestReview,
               agentSignals: signal.latestAttributes,
-              caveat: "Payment is onchain-verified; merchant identity and any linked place id are reviewer-claimed until an official place-link verification exists.",
+              caveat: "Merchant completion and customer claim are verified by Jiagon; payment proof is an optional additional signal and is not required for this rerank boost.",
             }
           : {
               matched: false,

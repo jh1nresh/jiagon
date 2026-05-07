@@ -1,9 +1,8 @@
 import { createHash, createHmac } from "node:crypto";
+import { solanaTestnetConfigFromEnv } from "@/lib/solanaNetwork";
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE58_INDEX = new Map([...BASE58_ALPHABET].map((char, index) => [char, index]));
-const DEFAULT_SOLANA_CLUSTER = "devnet";
-const DEFAULT_SOLANA_RPC_URL = "https://api.devnet.solana.com";
 const DEFAULT_SOLANA_CREDIT_PROGRAM_ID = "J1gUW4ZJwSeff33p5kvMLzPHtNMwCy4D7BAPizQzNGjB";
 const PDA_MARKER = "ProgramDerivedAddress";
 const ED25519_P = (BigInt(1) << BigInt(255)) - BigInt(19);
@@ -281,10 +280,11 @@ export function solanaCreditConfig() {
   const programId =
     process.env.SOLANA_CREDIT_PROGRAM_ID ||
     DEFAULT_SOLANA_CREDIT_PROGRAM_ID;
+  const { cluster, rpcUrl } = solanaTestnetConfigFromEnv();
 
   return {
-    cluster: process.env.SOLANA_CLUSTER || DEFAULT_SOLANA_CLUSTER,
-    rpcUrl: process.env.SOLANA_RPC_URL || DEFAULT_SOLANA_RPC_URL,
+    cluster,
+    rpcUrl,
     programId,
     programConfigured: Boolean(process.env.SOLANA_CREDIT_PROGRAM_ID),
     adapterMode: process.env.SOLANA_CREDIT_PROGRAM_ID ? "program-pda" : "signed-adapter",
@@ -376,13 +376,13 @@ export function buildSolanaCreditMirror(input: SolanaCreditMirrorInput, options:
     owner,
     sourceOwner,
     source: {
-      chain: "optimism",
+      chain: "solana",
       txHash: sourceTx,
       logIndex,
       sourceReceiptHash,
       amountUsd,
       signals: {
-        etherfiOnchainReceipt: receiptCount > 0,
+        merchantReceiptCredential: receiptCount > 0,
         solayerOffchainProofs: solayerProofs.length,
       },
     },
@@ -403,8 +403,8 @@ export function buildSolanaCreditMirror(input: SolanaCreditMirrorInput, options:
       plugins: {
         transferDelegate: "tree-authority",
         attributes: {
-          proof: "etherfi-spend",
-          merchantProof: "user-claimed",
+          proof: "merchant-receipt",
+          merchantProof: "merchant-completed-customer-claimed",
           creditUse: "underwriting-input",
         },
       },

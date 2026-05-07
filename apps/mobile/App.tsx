@@ -1,7 +1,7 @@
 import * as Linking from "expo-linking";
 import { PrivyProvider, useLoginWithEmail, usePrivy } from "@privy-io/expo";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -94,14 +94,6 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
   const [otpCode, setOtpCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
 
-  useEffect(() => {
-    const incomingToken = tokenFromUrl(initialUrl);
-    if (incomingToken) {
-      setClaimToken(incomingToken);
-      void loadReceiptPreview(incomingToken);
-    }
-  }, [initialUrl]);
-
   const mintStatus = receipt?.mintStatus || "none";
   const creditLabel = useMemo(() => {
     if (receipt?.creditImpact?.eligible) return `$${receipt.creditImpact.unlockedCreditUsd} unlocked`;
@@ -111,7 +103,7 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
     return "Locked";
   }, [mintStatus, receipt?.creditImpact]);
 
-  async function withBusy(task: () => Promise<void>) {
+  const withBusy = useCallback(async (task: () => Promise<void>) => {
     setBusy(true);
     setMessage("");
     try {
@@ -121,7 +113,7 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
     } finally {
       setBusy(false);
     }
-  }
+  }, []);
 
   async function sendLoginCode() {
     if (!auth.configured || !auth.sendCode) {
@@ -160,7 +152,7 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
     });
   }
 
-  async function loadReceiptPreview(nextToken = claimToken) {
+  const loadReceiptPreview = useCallback(async (nextToken: string) => {
     const token = nextToken.trim();
     if (!token) {
       setMessage("Paste a Jiagon claim token or open a jiagon://claim/{token} link.");
@@ -172,7 +164,15 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
       setReceipt(payload.receipt);
       setMessage(payload.receipt.status === "claimed" ? "Receipt loaded. Sign in to claim or mint." : "Receipt loaded from Jiagon.");
     });
-  }
+  }, [withBusy]);
+
+  useEffect(() => {
+    const incomingToken = tokenFromUrl(initialUrl);
+    if (incomingToken) {
+      setClaimToken(incomingToken);
+      void loadReceiptPreview(incomingToken);
+    }
+  }, [initialUrl, loadReceiptPreview]);
 
   async function claimReceipt() {
     if (!auth.authenticated) {
@@ -303,7 +303,16 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
               </TouchableOpacity>
             </>
           ) : (
-            <TouchableOpacity style={styles.secondaryButton} disabled={busy} onPress={() => void auth.logout?.()}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              disabled={busy}
+              onPress={() => {
+                setCodeSent(false);
+                setEmail("");
+                setOtpCode("");
+                void auth.logout?.();
+              }}
+            >
               <Text style={styles.secondaryButtonText}>Logout</Text>
             </TouchableOpacity>
           )}
@@ -331,7 +340,7 @@ function PassportScreen({ auth }: { auth: MobileAuth }) {
             value={claimToken}
           />
           <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.secondaryButton} disabled={busy} onPress={() => void loadReceiptPreview()}>
+            <TouchableOpacity style={styles.secondaryButton} disabled={busy} onPress={() => void loadReceiptPreview(claimToken)}>
               <Text style={styles.secondaryButtonText}>Load</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.primaryButton} disabled={!canClaim} onPress={claimReceipt}>

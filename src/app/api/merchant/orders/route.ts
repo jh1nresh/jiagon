@@ -186,7 +186,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Order total must be greater than $0 and at most $1,000 for the MVP." }, { status: 400 });
   }
 
-  const source = body.source === "telegram" || body.source === "web" ? body.source : "tile";
+  const source = body.source === "telegram" || body.source === "web" || body.source === "agent" ? body.source : "tile";
   const result = await createMerchantOrder({
     merchantId,
     merchantName,

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 
 type StoredSession = {
   userLabel?: string;
@@ -151,20 +152,22 @@ export default function AuthPage() {
           theme: "light",
           accentColor: "#A9573D",
           showWalletLoginFirst: true,
-          walletChainType: "ethereum-only",
+          walletChainType: "solana-only",
           walletList: [
-            "detected_ethereum_wallets",
-            "metamask",
-            "coinbase_wallet",
-            "base_account",
-            "okx_wallet",
-            "wallet_connect",
+            "phantom",
+            "solflare",
+            "backpack",
+            "jupiter",
+            "detected_solana_wallets",
+            "wallet_connect_qr_solana",
           ],
         },
         embeddedWallets: {
-          ethereum: { createOnLogin: "off" },
           solana: { createOnLogin: "off" },
           showWalletUIs: false,
+        },
+        externalWallets: {
+          solana: { connectors: toSolanaWalletConnectors({ shouldAutoConnect: false }) },
         },
       }}
     >

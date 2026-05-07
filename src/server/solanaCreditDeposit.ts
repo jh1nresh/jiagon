@@ -11,6 +11,7 @@ import {
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { solanaCreditConfig } from "@/lib/solanaCredit";
+import { solscanClusterParam } from "@/lib/solanaNetwork";
 
 const DRAW_RESTAURANT_DEPOSIT_DISCRIMINATOR = Buffer.from([189, 49, 140, 35, 98, 162, 0, 29]);
 const REPAY_RESTAURANT_DEPOSIT_DISCRIMINATOR = Buffer.from([244, 213, 85, 173, 204, 248, 0, 109]);
@@ -70,10 +71,6 @@ function i64(value: number | bigint) {
 
 function bytes32(value: string) {
   return createHash("sha256").update(value).digest();
-}
-
-function clusterParam(cluster: string) {
-  return cluster === "mainnet-beta" ? "" : `?cluster=${encodeURIComponent(cluster)}`;
 }
 
 export function solanaCreditDepositConfig() {
@@ -158,7 +155,7 @@ export async function drawDevnetRestaurantDeposit({
     status: "drawn",
     cluster: config.cluster,
     signature,
-    explorerUrl: `https://solscan.io/tx/${signature}${clusterParam(config.cluster)}`,
+    explorerUrl: `https://solscan.io/tx/${signature}${solscanClusterParam(config.cluster)}`,
     drawId: drawId.toString("hex"),
     purposeDraw: purposeDraw.toBase58(),
     amountCents,
@@ -213,7 +210,7 @@ export async function repayDevnetRestaurantDeposit({ drawId }: { drawId: string 
     status: "repaid",
     cluster: config.cluster,
     signature,
-    explorerUrl: `https://solscan.io/tx/${signature}${clusterParam(config.cluster)}`,
+    explorerUrl: `https://solscan.io/tx/${signature}${solscanClusterParam(config.cluster)}`,
     drawId,
     purposeDraw: purposeDraw.toBase58(),
   };
