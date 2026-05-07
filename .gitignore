@@ -43,6 +43,12 @@ CLAUDE.md
 # internal workflows
 /docs/workflows/
 
+# presentation scratch / local deck exports
+outputs/
+*.ppt
+*.pptx
+!public/jiagon-demo-brief.pptx
+
 # debug
 npm-debug.log*
 yarn-debug.log*
