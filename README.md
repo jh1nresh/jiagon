@@ -1,55 +1,54 @@
 # Jiagon
 
-Agentic POS and onchain receipt passport for real-world purchases.
+Personal agent commerce rail for real-world purchases.
 
-Jiagon turns a merchant-completed order into a customer-claimed receipt that can
-be minted as a Solana receipt credential and used for purpose-bound credit. The
-current MVP starts with a coffee-shop flow: a user says they want coffee, their
-personal agent orders from Raposa Coffee through Jiagon, prepares payment
-approval, tracks pickup, and the fulfilled receipt lands in Jiagon Passport.
+Jiagon lets personal agents order from real-world merchants, prepare external
+wallet payment approval, track merchant fulfillment, and turn verified receipts
+into credit memory. The first MVP starts with Raposa Coffee and ends with future
+purpose-bound dining deposits.
 
 Live app: [jiagon.vercel.app](https://jiagon.vercel.app)
 
 ## Why
 
-Real-world purchases are still hard for crypto apps and AI agents to verify.
-Jiagon adds a proof layer without asking a merchant to replace its POS:
+Real-world purchases are still hard for AI agents to complete and remember.
+Jiagon adds a commerce and proof layer without asking a merchant to replace its
+POS:
 
-- the customer or agent created an order intent;
-- the merchant marked the order paid and fulfilled;
-- the customer claimed the receipt with Privy;
+- the personal agent created an order intent;
+- the agent or user approved an external wallet payment request;
+- the merchant fulfilled the order;
+- Jiagon issued a verified receipt;
 - the receipt can become a Solana Bubblegum cNFT;
-- credit only unlocks when the receipt credential and server-side credit index
-  say it is eligible.
+- future agents can use the receipt as credit memory for purpose-bound deposits.
 
 The product is not trying to replace Square, Toast, or a full POS. Jiagon is the
-receipt passport and credit layer that can sit beside a normal counter-payment
-flow.
+agent-callable commerce rail plus receipt-credit memory layer that sits beside
+normal merchant operations.
 
 ## Product Flow
 
 ```txt
-User says "I want coffee"
--> Personal agent order API
--> Solana payment approval or counter fallback
--> Merchant queue
--> Staff taps Paid + Done
--> Jiagon issues a claimable receipt
--> Customer taps NFC / enters pickup code
--> Customer claims with Privy
--> Receipt appears in Passport
+Personal agent receives intent
+-> Agent calls /api/agent/orders
+-> Agent/user approves external wallet payment request
+-> Merchant queue receives order
+-> Merchant fulfills
+-> Jiagon issues verified receipt
+-> NFC / pickup-code claim binds receipt to passport identity
 -> Bubblegum receipt cNFT is minted or prepared
--> Credit preview updates
+-> Receipt becomes credit memory
+-> Future agent can request purpose-bound dining deposit credit
 ```
 
 Primary app surfaces:
 
-- **Agent API**: personal agent order intake at `/api/agent/orders`.
+- **Agent API**: personal agent commerce intake at `/api/agent/orders`.
 - **Tile**: NFC pickup station and manual fallback, e.g. `/tile/raposa-coffee`.
-- **Merchant**: order queue, `Paid + Done`, receipt issuing, demo readiness,
+- **Merchant**: agent order queue, fulfillment, receipt issuing, demo readiness,
   pilot metrics, and credit memo.
-- **Passport**: customer receipt wallet for claimed merchant receipts.
-- **Credit**: purpose-bound credit status and draw/repay demo surface.
+- **Passport**: verified purchase memory for future agents.
+- **Credit**: purpose-bound dining deposit policy and draw/repay demo surface.
 - **Mobile**: Android receipt passport with Privy Expo auth, Solana Mobile
   Wallet Adapter, and Bubblegum mint wiring.
 
@@ -58,12 +57,12 @@ Primary app surfaces:
 - Web app: Next.js App Router.
 - Mobile app: Expo Android under `apps/mobile`.
 - Auth: Privy on web and Privy Expo on mobile.
-- Order entry: personal agent API first, with Telegram bot and `/tile/{merchant}` fallback.
+- Order entry: personal agent API first, with Telegram bot and `/tile/{merchant}` as pilot terminals.
 - Pilot merchant: Raposa Coffee.
 - Receipt pickup: static NFC station plus pickup code.
 - Receipt credential: Solana Bubblegum cNFT when Bubblegum env is configured;
   otherwise the API returns `prepared`.
-- Credit state: receipt-backed, purpose-bound credit preview and devnet draw
+- Credit state: receipt-memory-backed, purpose-bound credit preview and devnet draw
   surfaces.
 - Persistence: Postgres when `DATABASE_URL` is configured; local demo memory
   fallback for development.
@@ -72,7 +71,7 @@ Primary app surfaces:
 Status labels matter:
 
 - `issued`: merchant has created a claimable receipt.
-- `claimed`: customer claimed the receipt with Privy.
+- `claimed`: receipt was bound to a passport identity.
 - `prepared`: Bubblegum credential payload/hash is ready, but no Solana
   transaction was confirmed.
 - `minted`: a real Solana Bubblegum receipt cNFT was minted.
@@ -83,11 +82,12 @@ Jiagon separates facts from claims so agents can reason safely.
 
 | Layer | MVP proof | Caveat |
 | --- | --- | --- |
-| Order intent | Telegram or tile order | Intent alone is not a receipt |
-| Merchant completion | Staff taps `Paid + Done` | Manual merchant attestation in the MVP |
-| Customer claim | Privy-authenticated claim | Customer account binding depends on Privy |
+| Order intent | Agent, Telegram, or tile order | Intent alone is not a receipt |
+| Payment request | Solana Pay / Helio external wallet approval | Payment intent is not fulfillment proof until verified |
+| Merchant completion | Staff marks fulfilled | Manual merchant attestation in the MVP |
+| Passport claim | Privy-authenticated claim | Identity binding is separate from payment |
 | Receipt credential | Solana Bubblegum cNFT or prepared payload | Live mint requires Bubblegum tree and minter env |
-| Credit | Receipt-indexed credit preview | Stronger payment proof can raise confidence later |
+| Credit memory | Receipt-indexed credit preview | Stronger payment proof can raise confidence later |
 
 Jiagon preserves a proof ladder:
 
@@ -120,11 +120,11 @@ POST /api/agent/orders
 ```
 
 The request can be as loose as "I want a coffee" or structured with menu items.
-The response returns the user's pickup result, the actions the agent handled,
-an order pass, pickup code, pickup estimate, merchant dispatch status, and
-optional Crypto Pay on Solana test request. Supported demo payment modes are
-`crypto_pay` and `pay_at_counter`. Legacy `helio_pay` and `solana_pay` aliases
-are accepted as `crypto_pay`.
+The response returns the agent's commerce handoff: pickup result, order pass,
+pickup code, pickup estimate, merchant dispatch status, receipt-memory path, and
+optional external Solana wallet payment request. Supported demo payment modes
+are `crypto_pay` and `pay_at_counter`. Legacy `helio_pay` and `solana_pay`
+aliases are accepted as `crypto_pay`.
 
 Browser demo:
 
@@ -132,9 +132,10 @@ Browser demo:
 GET /agent-order
 ```
 
-Use this page to simulate a personal agent call, then open the returned Crypto
-Pay checkout. Jiagon prefers Helio Solana checkout when `HELIO_PAYLINK_ID` is
-configured, with direct Solana Pay as the fallback.
+Use this page to simulate a personal agent call, then open the returned external
+wallet approval request. Jiagon prefers Helio Solana checkout when
+`HELIO_PAYLINK_ID` is configured, with official Solana Pay transfer URLs as the
+fallback.
 
 Recommendation from Jiagon's proof graph:
 
@@ -169,21 +170,22 @@ Private receipt passport data is not returned by public agent APIs.
 ## Demo Flow
 
 ```txt
-User tells personal agent: I want a coffee, under $10
+User tells personal agent: get me a coffee under $10
 -> agent calls /api/agent/orders
--> Jiagon selects Raposa, creates the order, and prepares payment approval
--> Jiagon returns pickup location, pickup code, ETA, and optional Crypto Pay request
+-> Jiagon selects Raposa, creates the order, and prepares external wallet approval
+-> Jiagon returns pickup location, pickup code, ETA, and optional Solana payment request
 -> merchant Telegram group or /merchant receives the order
--> user approves Crypto Pay if configured, otherwise counter payment is fallback
--> staff taps Paid + Done
--> Jiagon issues a receipt claim token
--> customer taps NFC station
--> customer enters pickup code
+-> agent/user approves payment if configured, otherwise counter payment is fallback
+-> merchant fulfills
+-> Jiagon issues a verified receipt claim token
+-> agent/user taps NFC station
+-> pickup code resolves the fulfilled order
 -> Jiagon opens /claim/{token}
--> customer claims with Privy
--> Passport shows the receipt
+-> receipt is bound to passport identity
+-> Passport shows verified purchase memory
 -> mobile app can connect Solana wallet with MWA
 -> Bubblegum receipt cNFT is minted or prepared
+-> future agent can use receipt memory for purpose-bound dining deposits
 ```
 
 ## Local Development
@@ -256,12 +258,12 @@ pnpm build
 ## API Surface
 
 - `POST /api/agent/orders`: lets a personal agent create a Raposa order pass,
-  enforce a max-spend policy, return pickup timing, and optionally prepare a
-  Crypto Pay on Solana test request.
+  enforce a max-spend policy, return pickup timing, and optionally prepare an
+  external Solana wallet payment request.
 - `POST /api/merchant/orders`: creates an agentic merchant order.
 - `GET /api/merchant/orders`: returns the merchant order queue.
-- `POST /api/merchant/orders/{id}/complete`: marks an order `Paid + Done`
-  and issues a claimable receipt.
+- `POST /api/merchant/orders/{id}/complete`: marks an order fulfilled and
+  issues a claimable verified receipt.
 - `GET /api/merchant/orders/claim`: resolves a pickup code to a claim URL.
 - `POST /api/telegram/webhook`: Telegram order and merchant action webhook.
 - `GET /api/merchant/receipts/{token}`: reads a public claimable receipt.

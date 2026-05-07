@@ -78,7 +78,7 @@ export async function GET(request: Request) {
       configured: telegramMissing.length === 0,
       mode: telegramMissing.length === 0 ? "merchant Telegram ready" : "setup required",
       missingCount: telegramMissing.length,
-      detail: "Customer Telegram orders can notify the merchant group and staff can tap Paid + Done.",
+      detail: "Agent or Telegram orders can notify the merchant group and staff can mark fulfillment.",
     },
     {
       id: "bubblegum",
@@ -102,7 +102,7 @@ export async function GET(request: Request) {
     },
     {
       id: "helio-pay",
-      label: "Crypto Pay on Solana",
+      label: "Agent wallet approval",
       status: readinessStatus(cryptoPayMissing.length === 0, helioBlocked),
       configured: cryptoPayMissing.length === 0,
       enabled: cryptoPayMissing.length === 0 && !helioBlocked,
@@ -114,7 +114,7 @@ export async function GET(request: Request) {
             ? "direct Solana Pay ready"
             : "optional setup",
       missingCount: cryptoPayMissing.length,
-      detail: "Agent orders can return one Crypto Pay on Solana request: Helio checkout first, direct Solana Pay fallback. Receipt issuance still requires staff Paid + Done until webhook verification is added.",
+      detail: "Agent orders can return one external Solana payment request: Helio checkout first, official Solana Pay fallback. Receipt issuance still requires merchant fulfillment until payment verification is added.",
       diagnostics: [
         {
           label: "network",

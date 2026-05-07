@@ -81,7 +81,7 @@ export async function GET(request: Request) {
       source: "Jiagon agentic POS receipt",
       credentialChain: "Solana devnet Bubblegum",
       storageLayer: "receipt metadata URI",
-      caveat: "Merchant completion and customer claim are verified by Jiagon; payment proof is optional until Solana Pay verification is configured.",
+      caveat: "Merchant completion and passport claim are verified by Jiagon; payment proof is optional until Solana Pay verification is configured.",
     },
     reasons: (() => {
       const signals = buildAgentSignals(merchant.latestAttributes);
@@ -120,12 +120,12 @@ export async function GET(request: Request) {
       source: "agentic-pos-order",
       credentialChain: "solana-devnet",
       storageLayer: "receipt metadata URI",
-      flow: "Agent order -> merchant completion -> customer claim -> Bubblegum receipt cNFT",
+      flow: "Agent order -> merchant completion -> passport claim -> Bubblegum receipt cNFT",
     },
     proofLevels: {
-      A: "Solana payment plus merchant fulfillment plus customer claim",
-      B: "Bubblegum receipt cNFT minted from merchant-completed, customer-claimed receipt",
-      C: "Merchant-completed receipt claimed by customer",
+      A: "Solana payment plus merchant fulfillment plus passport claim",
+      B: "Bubblegum receipt cNFT minted from merchant-completed, passport-claimed receipt",
+      C: "Merchant-completed receipt claimed into passport memory",
       D: "Order intent only",
     },
     recommendations,

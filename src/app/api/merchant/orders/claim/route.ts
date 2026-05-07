@@ -64,6 +64,6 @@ export async function GET(request: Request) {
     order: publicOrder,
     message: order.status === "completed"
       ? "Receipt is still being prepared. Ask staff to refresh and try again."
-      : "Staff has not marked this order Paid + Done yet.",
+      : "Staff has not marked this order fulfilled yet.",
   });
 }

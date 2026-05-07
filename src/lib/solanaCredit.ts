@@ -404,7 +404,7 @@ export function buildSolanaCreditMirror(input: SolanaCreditMirrorInput, options:
         transferDelegate: "tree-authority",
         attributes: {
           proof: "merchant-receipt",
-          merchantProof: "merchant-completed-customer-claimed",
+          merchantProof: "merchant-completed-passport-claimed",
           creditUse: "underwriting-input",
         },
       },

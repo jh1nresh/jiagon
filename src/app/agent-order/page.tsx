@@ -63,13 +63,13 @@ type AgentOrderResponse = {
 const paymentModes: Array<{ id: PaymentMode; label: string; detail: string }> = [
   {
     id: "crypto_pay",
-    label: "Crypto Pay on Solana",
-    detail: "Uses Helio Solana checkout when configured, with direct Solana Pay as fallback.",
+    label: "Agent wallet approval",
+    detail: "External Solana payment request prepared for an agent or user wallet.",
   },
   {
     id: "pay_at_counter",
-    label: "Counter fallback",
-    detail: "Manual pilot path when no test payment route is configured.",
+    label: "Counter pilot fallback",
+    detail: "Merchant collects payment while the agent still tracks fulfillment and receipt memory.",
   },
 ];
 
@@ -85,8 +85,8 @@ function jiagonRequestBody(paymentMode: PaymentMode, userIntent: string, maxSpen
 
 function paymentStatusCopy(payment?: AgentOrderResponse["payment"]) {
   if (!payment) return "No order yet";
-  if (payment.status === "checkout_config_created") return "Crypto Pay checkout ready";
-  if (payment.status === "payment_request_created") return "Crypto Pay fallback ready";
+  if (payment.status === "checkout_config_created") return "Agent wallet checkout ready";
+  if (payment.status === "payment_request_created") return "External Solana approval ready";
   if (payment.status === "setup_required") return `Setup required: ${(payment.missing || []).join(", ")}`;
   if (payment.status === "blocked") return "Blocked by testnet guard";
   return payment.status || "Payment handled at counter";
@@ -94,7 +94,7 @@ function paymentStatusCopy(payment?: AgentOrderResponse["payment"]) {
 
 export default function AgentOrderDemoPage() {
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("crypto_pay");
-  const [userIntent, setUserIntent] = useState("I want a coffee. Keep it under $10 and use crypto pay if possible.");
+  const [userIntent, setUserIntent] = useState("Get me a coffee under $10 and use an external wallet approval if possible.");
   const [maxSpendUsd, setMaxSpendUsd] = useState("10.00");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AgentOrderResponse | null>(null);
@@ -430,7 +430,7 @@ export default function AgentOrderDemoPage() {
             <div className="agent-order-mark">J</div>
             <div>
               <div className="agent-order-wordmark">Jiagon</div>
-              <div className="agent-order-sub">Agentic POS demo</div>
+              <div className="agent-order-sub">Personal agent commerce rail</div>
             </div>
           </div>
           <nav className="agent-order-nav" aria-label="Agent order demo">
@@ -444,23 +444,23 @@ export default function AgentOrderDemoPage() {
 
         <section className="agent-order-hero">
           <div className="agent-order-card">
-            <div className="agent-order-kicker">User intent &rarr; agent-run checkout</div>
-            <h1 className="agent-order-title">Say coffee. Let the agent handle the POS.</h1>
+            <div className="agent-order-kicker">Agent order &rarr; payment approval &rarr; fulfillment receipt</div>
+            <h1 className="agent-order-title">Tell your agent. The agent handles commerce.</h1>
             <p className="agent-order-copy">
-              This is the flow to demo: the user only states intent. A personal agent
-              calls Jiagon, creates the Raposa order, prepares payment approval, tracks
-              pickup, and stores the receipt for future dining credit.
+              This is the demo spine: a personal agent calls Jiagon, creates the Raposa
+              order, prepares an external wallet payment request, tracks fulfillment, and
+              stores verified receipt memory for future purpose-bound dining deposits.
             </p>
-            <div className="agent-order-script" aria-label="Agentic POS conversation">
-              <div className="agent-order-bubble">I want a coffee. Keep it under $10.</div>
+            <div className="agent-order-script" aria-label="Personal agent commerce conversation">
+              <div className="agent-order-bubble">Get me a coffee under $10.</div>
               <div className="agent-order-bubble agent">
-                I found Raposa Coffee, prepared payment, and will tell you where to pick it up.
+                I created a Raposa order, prepared wallet approval, and will track pickup and receipt memory.
               </div>
             </div>
 
             <div className="agent-order-form">
               <div className="agent-order-field">
-                <label htmlFor="agent-intent">User tells their agent</label>
+                <label htmlFor="agent-intent">Instruction to personal agent</label>
                 <textarea
                   id="agent-intent"
                   value={userIntent}
@@ -512,8 +512,8 @@ export default function AgentOrderDemoPage() {
 
             {!result && !error && (
               <div className="agent-order-empty">
-                Start the agent run to see what the user receives: pickup location,
-                approval step, ready time, receipt claim path, and future credit use.
+                Start the agent run to see the commerce handoff: pickup result,
+                wallet approval, merchant fulfillment, receipt memory, and future credit use.
               </div>
             )}
 
@@ -563,14 +563,14 @@ export default function AgentOrderDemoPage() {
                   {canOpenSolanaPay && (
                     <div className="agent-order-link-row">
                       <a className="agent-order-link primary" href={result.payment?.url}>
-                        Open Solana Pay fallback
+                        Open external Solana approval
                       </a>
                       <button
                         className="agent-order-link"
                         type="button"
                         onClick={() => navigator.clipboard.writeText(result.payment?.url || "")}
                       >
-                        Copy solana URL
+                        Copy payment URL
                       </button>
                     </div>
                   )}
@@ -585,7 +585,7 @@ export default function AgentOrderDemoPage() {
                 {result.agentExecution && (
                   <section className="agent-order-handoff">
                     <div className="agent-order-handoff-panel">
-                      <div className="agent-order-label">What the user sees</div>
+                      <div className="agent-order-label">What the agent returns</div>
                       <ul className="agent-order-list">
                         {(result.agentExecution.userVisibleResult || []).map((item, index) => (
                           <li key={`visible-${index}-${item}`}>{item}</li>
@@ -607,7 +607,7 @@ export default function AgentOrderDemoPage() {
                 )}
 
                 <section>
-                  <div className="agent-order-label">Receipt to credit path</div>
+                  <div className="agent-order-label">Receipt memory to credit path</div>
                   <ul className="agent-order-list">
                     {(result.creditPath || []).map((step, index) => (
                       <li key={`credit-${index}-${step}`}>{step}</li>
@@ -616,7 +616,7 @@ export default function AgentOrderDemoPage() {
                 </section>
 
                 <section>
-                  <div className="agent-order-label">Customer instructions</div>
+                  <div className="agent-order-label">Agent/user instructions</div>
                   <ul className="agent-order-list">
                     {(result.customerInstructions || []).map((instruction, index) => (
                       <li key={`instruction-${index}-${instruction}`}>{instruction}</li>

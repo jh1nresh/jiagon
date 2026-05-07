@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { address } from "@solana/kit";
+import { encodeURL } from "@solana/pay";
+import bs58 from "bs58";
 import { Pool } from "pg";
 import {
   createMerchantOrder,
@@ -331,6 +334,15 @@ function solanaPaySplToken() {
   return (process.env.JIAGON_SOLANA_PAY_SPL_TOKEN || process.env.NEXT_PUBLIC_JIAGON_SOLANA_PAY_SPL_TOKEN || "").trim();
 }
 
+function solanaPayNativeSolAmount() {
+  const configured = (process.env.JIAGON_SOLANA_PAY_SOL_AMOUNT || process.env.NEXT_PUBLIC_JIAGON_SOLANA_PAY_SOL_AMOUNT || "0.001").trim();
+  return /^\d+(\.\d+)?$/.test(configured) ? configured : "0.001";
+}
+
+function solanaPayReference(orderId: string) {
+  return bs58.encode(createHash("sha256").update(`jiagon-solana-pay:${orderId}`).digest());
+}
+
 function solanaPayIntent(input: {
   merchant: MerchantProfile;
   orderId: string;
@@ -342,14 +354,19 @@ function solanaPayIntent(input: {
     return null;
   }
 
-  const params = new URLSearchParams({
-    amount: input.amountUsd,
+  const splToken = solanaPaySplToken();
+  const amount = splToken ? input.amountUsd : solanaPayNativeSolAmount();
+  const memo = `jiagon:${input.orderId}`;
+  const reference = solanaPayReference(input.orderId);
+  const url = encodeURL({
+    recipient: address(recipient),
+    amount: Number(amount),
+    reference: address(reference),
     label: input.merchant.name,
     message: `Jiagon Order Pass ${input.pickupCode}`,
-    memo: `jiagon:${input.orderId}`,
+    memo,
+    ...(splToken ? { splToken: address(splToken) } : {}),
   });
-  const splToken = solanaPaySplToken();
-  if (splToken) params.set("spl-token", splToken);
 
   return {
     mode: "crypto_pay",
@@ -358,12 +375,16 @@ function solanaPayIntent(input: {
     rail: "solana",
     recipient,
     amountUsd: input.amountUsd,
+    amount,
     network: "solana-devnet",
     currency: splToken ? "devnet SPL token" : "devnet SOL",
     splToken: splToken || null,
-    url: `solana:${recipient}?${params.toString()}`,
-    memo: `jiagon:${input.orderId}`,
-    note: "This is a devnet payment request for the demo. Receipt issuance still requires merchant fulfillment confirmation unless a Solana Pay verification webhook is added.",
+    url: url.toString(),
+    memo,
+    reference,
+    note: splToken
+      ? "This is a devnet SPL token Solana Pay request for the demo. Receipt issuance still requires merchant fulfillment confirmation unless a Solana Pay verification webhook is added."
+      : "This is a nominal devnet SOL Solana Pay request for the demo. The receipt keeps the USD order total; use a devnet SPL token mint for exact USD-denominated transfer amounts.",
   };
 }
 
@@ -431,7 +452,7 @@ function helioPayIntent(input: {
       showPayWithCard: false,
       additionalJSON,
     },
-    note: "This returns a Helio Solana test checkout config for the demo. Receipt issuance still requires merchant Paid + Done until a Helio webhook or transaction query is added.",
+    note: "This returns an external Solana wallet checkout config for the demo. Receipt issuance still requires merchant fulfillment until a Helio webhook or transaction query is added.",
   };
 }
 
@@ -440,7 +461,7 @@ function counterPaymentIntent() {
     mode: "pay_at_counter",
     status: "external_payment_required",
     provider: "counter_pos",
-    note: "Payment is collected by the merchant; Jiagon receipt issuance still requires staff Paid + Done.",
+    note: "Payment is collected by the merchant; Jiagon receipt issuance still requires merchant fulfillment.",
   };
 }
 
@@ -466,7 +487,7 @@ function paymentIntent(input: {
     rail: "solana",
     missing: ["HELIO_PAYLINK_ID or JIAGON_SOLANA_PAY_RECIPIENT"],
     network: "test",
-    note: "Crypto Pay needs either a Helio dev paylink or a Solana Pay devnet recipient. Staff can still collect payment at the counter.",
+    note: "Agent wallet approval needs either a Helio dev paylink or a Solana Pay devnet recipient. Staff can still collect payment at the counter.",
   };
 }
 
@@ -480,17 +501,17 @@ function agentExecutionPlan(input: {
     input.payment.status === "checkout_config_created" ||
     input.payment.status === "payment_request_created"
   )
-    ? "User approves the Solana payment intent; agent continues tracking pickup."
-    : "Payment is external in this pilot; agent still tracks the order pass and receipt state.";
+    ? "Agent/user approves the external Solana payment request; the agent continues tracking pickup."
+    : "Payment is external in this pilot; the agent still tracks the order pass and receipt state.";
 
   return {
-    userSaid: "I want coffee.",
+    userSaid: "Get me a coffee under $10.",
     agentHandled: [
       `Selected ${input.merchant.name} and matched the menu item.`,
-      "Created the order pass through Jiagon Agentic POS.",
-      "Prepared payment route and user approval step.",
+      "Created the merchant order pass through Jiagon.",
+      "Prepared an approval-bound external wallet payment route.",
       "Sent the order into the merchant terminal.",
-      "Prepared NFC receipt claim and credit unlock path.",
+      "Prepared NFC receipt claim and future credit memory path.",
     ],
     userVisibleResult: [
       `Pickup at ${input.merchant.name}.`,
@@ -499,8 +520,8 @@ function agentExecutionPlan(input: {
     ],
     paymentApproval,
     merchantTerminal: "Telegram is the lightweight merchant terminal; the product surface is the agent-callable POS API.",
-    receiptAutomation: "After merchant Paid + Done, Jiagon turns the fulfilled order into a claimable receipt passport record.",
-    futureCreditUse: "The collected receipt history can later unlock purpose-bound fine-dining deposit credit.",
+    receiptAutomation: "After merchant fulfillment, Jiagon turns the completed order into verified receipt memory.",
+    futureCreditUse: "Future agents can use that verified purchase memory to request purpose-bound dining deposits.",
   };
 }
 
@@ -592,7 +613,7 @@ export async function POST(request: Request) {
   const notes = [
     userIntent ? `User intent: ${userIntent}` : "",
     `Pickup estimate: ${pickup.label}`,
-    paymentMode === "crypto_pay" ? "Payment requested: Crypto Pay on Solana." : "",
+    paymentMode === "crypto_pay" ? "Payment requested: external Solana wallet approval." : "",
     cleanLongText(body.notes),
   ].filter(Boolean).join(" ");
   const result = await createMerchantOrder({
@@ -646,7 +667,7 @@ export async function POST(request: Request) {
 
   return Response.json(
     {
-      product: "Jiagon personal agent ordering",
+      product: "Jiagon personal agent commerce rail",
       status: "order_pass_created",
       proofLevel: "order_intent_only",
       mode: result.configured ? "database" : "local-demo-memory",
@@ -659,7 +680,7 @@ export async function POST(request: Request) {
           merchantId: merchant.id,
           maxSpendUsd: maxSpendCents === null ? null : (maxSpendCents / 100).toFixed(2),
           paymentMode,
-          receiptPolicy: "receipt_claim_requires_merchant_paid_done",
+        receiptPolicy: "receipt_memory_requires_merchant_fulfillment",
         },
       },
       merchant: {
@@ -683,7 +704,7 @@ export async function POST(request: Request) {
           ? "Add Helio webhook verification for L4 payment-backed receipts."
           : payment.provider === "solana_pay"
             ? "Add Solana transaction confirmation query for L4 payment-backed receipts."
-            : "Use merchant Paid + Done for L2 receipt proof in the pilot.",
+            : "Use merchant fulfillment for L2 receipt proof in the pilot.",
       },
       staffDispatch: merchantNotify.sent ? "sent" : merchantNotify.skipped ? "skipped" : "failed",
       creditPath: [
@@ -691,29 +712,29 @@ export async function POST(request: Request) {
         payment.mode === "crypto_pay" && (
           payment.status === "checkout_config_created" || payment.status === "payment_request_created"
         )
-          ? "L1 Solana payment intent returned"
+          ? "L1 external Solana payment request returned"
           : payment.mode === "crypto_pay"
-            ? "L1 Solana payment route needs demo env setup"
+            ? "L1 agent wallet payment route needs demo env setup"
             : "L1 counter payment pending",
-        "L2 merchant taps Paid + Done",
-        "L3 customer claims receipt by NFC / Privy",
-        "Credit page unlocks purpose-bound restaurant deposit credit",
+        "L2 merchant fulfills the real-world order",
+        "L3 receipt is claimed into passport identity",
+        "Receipt becomes credit memory for purpose-bound dining deposits",
       ],
       customerInstructions: [
         `Pickup at ${merchant.name} with Order Pass ${order.pickupCode}.`,
         payment.mode === "crypto_pay" && payment.status === "payment_request_created"
-          ? "Approve the Solana Pay request; Jiagon keeps the order pass tied to pickup and receipt claim."
+          ? "Approve the external Solana payment request; Jiagon keeps the order pass tied to pickup and receipt memory."
           : payment.mode === "crypto_pay" && payment.status === "checkout_config_created"
-            ? "Approve the Helio Solana test checkout; Jiagon keeps the order pass tied to pickup and receipt claim."
-          : "Counter payment is the pilot fallback; the agent still tracks pickup and receipt claim.",
+            ? "Approve the Helio Solana test checkout; Jiagon keeps the order pass tied to pickup and receipt memory."
+          : "Counter payment is the pilot fallback; the agent still tracks pickup and receipt memory.",
         `Pickup target: ${pickup.label}.`,
-        "After staff taps Paid + Done, tap the NFC receipt station to claim the onchain receipt into Jiagon Passport.",
+        "After staff marks the order fulfilled, tap the NFC receipt station to claim verified receipt memory into Jiagon Passport.",
       ],
       urls: {
         nfcStation: stationUrl,
         pairPhoneForNfcClaim: pairUrl,
       },
-      next: "Merchant confirmation upgrades the order to merchant_completed; customer NFC claim upgrades it to customer_claimed and unlocks the receipt passport flow.",
+      next: "Merchant fulfillment upgrades the order to merchant_completed; NFC claim upgrades it to verified receipt memory for future purpose-bound credit.",
     },
     { status: 201 },
   );

@@ -124,7 +124,7 @@ const defaultMerchant = {
   purpose: "cafe_purchase",
   receiptNumber: "RAP-001",
   issuedBy: "Jiagon demo merchant",
-  memo: "Merchant-issued receipt for Jiagon receipt passport demo.",
+  memo: "Merchant-issued receipt for Jiagon verified purchase memory demo.",
 };
 
 function merchantFromQuery() {
@@ -516,23 +516,24 @@ export default function MerchantPage() {
             <span>Jiagon</span>
           </a>
           <nav>
-            <a href="/">Receipts</a>
+            <a href="/agent-order">Agent Orders</a>
             <a href="/credit">Credit</a>
           </nav>
         </header>
 
         <div className="merchant-grid">
           <section className="merchant-copy">
-            <div className="merchant-kicker">Merchant dashboard</div>
-            <h1>Issue a wallet-bound receipt.</h1>
+            <div className="merchant-kicker">Agent commerce terminal</div>
+            <h1>Fulfill agent-created orders.</h1>
             <p>
-              Create a merchant-issued receipt without POS integration. Jiagon returns a one-time claim link that a
-              customer can claim into their receipt passport in the next step.
+              Jiagon does not replace the merchant POS. It gives staff a lightweight terminal for agent-created orders:
+              confirm fulfillment, issue a verified receipt, and turn the receipt into credit memory.
             </p>
             <div className="merchant-flow">
-              <span>Issue receipt</span>
-              <span>Claim link</span>
-              <span>Passport ready</span>
+              <span>Agent order</span>
+              <span>Payment approval</span>
+              <span>Fulfilled receipt</span>
+              <span>Credit memory</span>
             </div>
           </section>
 
@@ -600,8 +601,8 @@ export default function MerchantPage() {
               <div className="merchant-kicker">Demo readiness</div>
               <h2>Consensus operator checks</h2>
               <p>
-                Verify the live demo can run from Telegram order to Bubblegum receipt mint and devnet credit draw before
-                standing at the counter.
+                Verify the live demo can run from agent order to merchant fulfillment, receipt memory, Bubblegum mint,
+                and optional purpose-bound credit before standing at the counter.
               </p>
             </div>
             <button type="button" onClick={loadDemoReadiness} disabled={readinessBusy}>
@@ -653,8 +654,8 @@ export default function MerchantPage() {
             <div className="merchant-kicker">Merchant onboarding</div>
             <h2>Set up a pilot without code changes</h2>
             <p>
-              Use these URLs for a new cafe or restaurant pilot. Put the NFC station URL on a sticker, use the customer
-              tile for Telegram or QR ordering, and keep this dashboard open for Paid + Done.
+              Use these URLs for a new cafe or restaurant pilot. Put the NFC station URL on a sticker, let agents create
+              order passes, and keep this terminal open for fulfillment.
             </p>
           </div>
           <div className="merchant-setup-grid">
@@ -671,20 +672,20 @@ export default function MerchantPage() {
           </div>
           <div className="merchant-setup-flow">
             <span>1. Configure merchant</span>
-            <span>2. Share tile</span>
+            <span>2. Share agent/tile entry</span>
             <span>3. Write NFC station URL</span>
-            <span>4. Staff taps Paid + Done</span>
+            <span>4. Staff marks fulfilled</span>
           </div>
         </section>
 
         <section className="merchant-order-panel">
           <div className="merchant-order-top">
             <div>
-              <div className="merchant-kicker">Agentic POS queue</div>
+              <div className="merchant-kicker">Agent commerce queue</div>
               <h2>Incoming orders</h2>
               <p>
-                Orders from NFC tiles or Telegram start as L0 intent. Accept or complete them to upgrade the merchant
-                proof level before the receipt-claim step.
+                Orders from agents, NFC tiles, or Telegram start as intent. Fulfillment is the merchant attestation that
+                lets Jiagon issue verified receipt memory.
               </p>
             </div>
             <div className="merchant-order-controls">
@@ -728,7 +729,7 @@ export default function MerchantPage() {
               <strong>{pilotMetrics?.orderConfirmed ?? 0}</strong>
             </div>
             <div>
-              <span>Paid + Done</span>
+              <span>Fulfilled</span>
               <strong>{pilotMetrics?.merchantDone ?? 0}</strong>
             </div>
             <div>
@@ -814,7 +815,7 @@ export default function MerchantPage() {
                           disabled={Boolean(orderActionId)}
                           onClick={() => updateOrderStatus(order.id, "completed")}
                         >
-                          {orderActionId === `${order.id}:completed` ? "Completing..." : "Paid + Done"}
+                          {orderActionId === `${order.id}:completed` ? "Completing..." : "Mark fulfilled"}
                         </button>
                       )}
                       {canCancel && (

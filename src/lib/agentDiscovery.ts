@@ -1,14 +1,14 @@
 const product = {
   name: "Jiagon",
-  title: "Jiagon verified local recommendation API",
-  description: "Receipt-backed local ordering, recommendation, and credit data for agents.",
+  title: "Jiagon personal agent commerce rail",
+  description: "Agent ordering, merchant fulfillment, verified receipt memory, and purpose-bound credit data.",
   version: "0.1.0",
 };
 
 const proofLevels = {
-  A: "Solana payment plus merchant fulfillment plus customer claim.",
-  B: "Bubblegum receipt cNFT minted from merchant-completed, customer-claimed receipt.",
-  C: "Merchant-completed order receipt claimed by the customer.",
+  A: "Verified payment plus merchant fulfillment plus passport claim.",
+  B: "Bubblegum receipt cNFT minted from merchant-completed, passport-claimed receipt.",
+  C: "Merchant-completed order receipt claimed into passport memory.",
   D: "Order intent only; not credit-grade until merchant completion.",
 };
 
@@ -28,14 +28,14 @@ export function agentDiscovery(origin: string) {
     humanDocs: `${origin}/api/agent`,
     openapi: `${origin}/openapi.json`,
     wellKnown: `${origin}/.well-known/jiagon-agent.json`,
-    primaryUseCase: "Let a personal agent turn user intent into a merchant order, payment approval, pickup result, receipt passport, and purpose-bound credit history.",
-    exampleUserIntent: "I want a coffee. Keep it under $10 and use crypto pay if possible.",
+    primaryUseCase: "Let a personal agent turn intent into a merchant order, external wallet approval, fulfillment receipt, credit memory, and future purpose-bound dining deposits.",
+    exampleUserIntent: "Get me a coffee under $10 and use an external wallet approval if possible.",
     exampleAgentCall: {
       method: "POST",
       url: `${origin}/api/agent/orders`,
       body: {
         agentId: "seeker-demo-agent",
-        userIntent: "I want a coffee. Keep it under $10 and use crypto pay if possible.",
+        userIntent: "Get me a coffee under $10 and use an external wallet approval if possible.",
         maxSpendUsd: "10.00",
         paymentMode: "crypto_pay",
       },
@@ -64,19 +64,19 @@ export function agentDiscovery(origin: string) {
         url: `${origin}/api/agent/orders`,
         body: {
           agentId: "Stable id for the user's personal agent.",
-          userIntent: "Natural order request. Example: I want a coffee under $10.",
+          userIntent: "Natural order request. Example: get me a coffee under $10.",
           merchantId: "Optional known Jiagon merchant id. Defaults to raposa-coffee in the demo.",
           items: "Optional structured menu items instead of natural language.",
           maxSpendUsd: "Optional user spending policy enforced before the order pass is created.",
-          paymentMode: "Optional: crypto_pay or pay_at_counter. Legacy helio_pay and solana_pay aliases are accepted.",
+          paymentMode: "Optional: crypto_pay for external wallet approval, or pay_at_counter for a pilot fallback.",
         },
         returns: [
-          "agent execution handoff: user-visible result and agent-handled steps",
+          "agent execution handoff: agent-returned result and agent-handled steps",
           "order pass and pickup code",
           "pickup estimate",
-          "optional Crypto Pay on Solana test request",
+          "optional external Solana wallet payment request",
           "merchant staff dispatch status",
-          "NFC receipt station URL for claim after merchant Paid + Done",
+          "NFC receipt station URL for claim after merchant fulfillment",
         ],
       },
       recommendations: {
@@ -126,7 +126,7 @@ export function agentDiscovery(origin: string) {
       source: "agentic-pos-order",
       credentialChain: "solana-devnet",
       storageLayer: "receipt metadata URI",
-      flow: "Agent order -> merchant fulfillment -> customer claim -> Bubblegum receipt cNFT -> Jiagon Passport -> purpose-bound credit",
+      flow: "Agent order -> payment approval -> merchant fulfillment -> passport claim -> Bubblegum receipt cNFT -> credit memory -> purpose-bound dining deposit",
     },
   };
 }

@@ -215,7 +215,7 @@ export async function POST(request: Request) {
       configured: result.configured,
       persisted: result.persisted,
       order: publicMerchantOrder(result.order),
-      next: "Merchant dashboard queue will accept or complete this order in the next Agentic POS step.",
+      next: "Merchant dashboard queue will accept or complete this order in the next agent commerce step.",
     },
     { status: 201 },
   );

@@ -10,11 +10,11 @@ const demoCurl = `curl -X POST https://jiagon.vercel.app/api/agent/orders \\
   }'`;
 
 const flow = [
-  ["01", "User intent", "User says they want coffee; they do not operate the POS."],
-  ["02", "Agent checkout", "Agent calls Jiagon, selects Raposa, prepares payment approval."],
-  ["03", "Pickup result", "User only receives pickup location, code, and ready time."],
-  ["04", "Receipt passport", "Fulfilled order becomes a claimable Solana receipt."],
-  ["05", "Dining credit", "Receipt history unlocks future fine-dining deposit credit."],
+  ["01", "Agent orders", "A personal agent turns intent into a merchant order pass."],
+  ["02", "Payment approval", "Agent or user approves an external wallet payment request."],
+  ["03", "Merchant fulfills", "The merchant confirms the real-world order was completed."],
+  ["04", "Verified receipt", "Jiagon issues a claimable receipt and optional Solana credential."],
+  ["05", "Credit memory", "Receipt history becomes agent-readable underwriting memory."],
 ];
 
 function JiagonMark() {
@@ -243,7 +243,7 @@ export default function Home() {
             <JiagonMark />
             <div>
               <div className="home-wordmark">Jiagon</div>
-              <div className="home-sub">Agentic POS & receipt credit</div>
+              <div className="home-sub">Personal agent commerce rail</div>
             </div>
           </div>
           <nav className="home-nav" aria-label="Primary">
@@ -258,12 +258,12 @@ export default function Home() {
 
         <section className="home-hero">
           <div>
-            <div className="home-kicker">Intent &rarr; order &rarr; payment approval &rarr; receipt &rarr; credit</div>
-            <h1 className="home-title">Say coffee. Your agent handles the POS.</h1>
+            <div className="home-kicker">Agent order &rarr; payment approval &rarr; fulfillment &rarr; receipt memory &rarr; credit</div>
+            <h1 className="home-title">Your agent can buy from real merchants.</h1>
             <p className="home-copy">
-              Jiagon lets a personal agent choose the merchant, create the order, prepare
-              Solana payment approval, track pickup, and collect the verified receipt. That
-              receipt history becomes the credit signal for future restaurant deposits.
+              Jiagon is a personal agent commerce rail: agents create merchant orders,
+              prepare external wallet payment approval, track fulfillment, and turn verified
+              receipts into credit memory for future purpose-bound dining deposits.
             </p>
             <div className="home-actions">
               <Link className="home-button" href="/agent-order">Try agent order demo</Link>
@@ -290,15 +290,15 @@ export default function Home() {
         <section className="home-grid">
           <section className="home-card dark">
             <div className="home-label">Agent-callable order API</div>
-            <h2 className="home-panel-title">Your agent calls the POS. You only approve payment.</h2>
+            <h2 className="home-panel-title">The agent calls commerce infrastructure. Payment stays approval-bound.</h2>
             <pre className="home-code">{demoCurl}</pre>
           </section>
           <section className="home-card">
-            <div className="home-label">Credit boundary</div>
-            <h2 className="home-panel-title">Credit is purpose-bound, not open cash.</h2>
+            <div className="home-label">Credit memory boundary</div>
+            <h2 className="home-panel-title">Receipts become memory. Credit stays purpose-bound.</h2>
             <p className="home-copy">
-              The first lending use case is a fine-dining reservation deposit: amount-capped,
-              recipient-bound, category-bound, expiring, and backed by verified receipt history.
+              Future agents can use verified purchase memory to request dining deposits that
+              are amount-capped, recipient-bound, category-bound, expiring, and never open cash.
             </p>
             <div className="home-pill-row">
               <StatusPill>Solana-first</StatusPill>

@@ -386,7 +386,7 @@ function helpText(merchant: MerchantProfile) {
     `${merchant.name}: type a natural order, like "one iced latte".`,
     `Manual fallback: /order ${merchant.id} ${merchant.menu[0]?.id || "coffee"} 1`,
     "",
-    "After Raposa confirms payment and taps Paid + Done, NFC lets the customer claim the verified receipt.",
+    "After Raposa confirms fulfillment, NFC lets the agent/user claim the verified receipt.",
   ].join("\n");
 }
 
@@ -735,12 +735,12 @@ async function handleCallback(request: Request, callback: TelegramCallbackQuery)
     ? [
         `Receipt ready for Order Pass #${order.pickupCode}`,
         "",
-        "Customer claim flow:",
+        "Receipt memory claim flow:",
         "1. Ask the customer to tap the Raposa NFC receipt station.",
         `2. Customer enters Order Pass ${order.pickupCode}.`,
         `NFC station: ${nfcStationUrl(origin, order.merchantId)}`,
         "",
-        "Proof: merchant_completed -> customer_claimed after customer claim.",
+        "Proof: merchant_completed -> passport_claimed after receipt claim.",
       ].join("\n")
     : `Could not complete order ${parsed.orderId}: ${result.error || "order not found"}`;
 
@@ -869,7 +869,7 @@ async function createTelegramOrderReply({
     "",
     pairUrl ? `Pair phone for NFC receipt pickup: ${pairUrl}` : "",
     `Show this pass at ${merchant.name}. Pay at the counter as usual.`,
-    "This is not a receipt yet. After Raposa confirms payment and taps Paid + Done, tap NFC to claim the receipt into Jiagon Passport.",
+    "This is not a receipt yet. After Raposa confirms fulfillment, tap NFC to claim the receipt into Jiagon Passport.",
   ].filter(Boolean).join("\n");
 
   return telegramResponse(chatId, reply, 200);

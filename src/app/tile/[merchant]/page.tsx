@@ -207,11 +207,11 @@ export default function TilePage() {
       }
       setClaimMessage(
         (isNfcStation && payload.order?.status !== "completed"
-          ? "Waiting for Raposa to confirm counter payment. Tap NFC again after staff taps Paid + Done."
+          ? "Waiting for Raposa to mark the order fulfilled. Tap NFC again after staff confirmation."
           : payload.message) ||
           (options.auto
-            ? "Your Order Pass is paired. Ask staff to confirm payment and tap Paid + Done, then tap NFC again."
-            : "Receipt is not ready yet. Ask staff to tap Paid + Done."),
+            ? "Your Order Pass is paired. Ask staff to confirm fulfillment, then tap NFC again."
+            : "Receipt is not ready yet. Ask staff to mark the order fulfilled."),
       );
     } catch (lookupError) {
       setError(lookupError instanceof Error ? lookupError.message : "Unable to find receipt.");
@@ -300,10 +300,10 @@ export default function TilePage() {
 
         <section className="tile-card">
           <div className="tile-kicker">NFC / Telegram order tile</div>
-          <h1>{isNfcStation ? "Tap to claim." : "Pair for NFC."}</h1>
+          <h1>{isNfcStation ? "Claim receipt memory." : "Pair for NFC."}</h1>
           <p>
             {isNfcStation
-              ? `This NFC station is for receipt pickup at ${merchant.name}. After staff confirms payment and taps Paid + Done, Jiagon checks the paired Order Pass and opens the verified receipt claim.`
+              ? `This NFC station is for receipt memory pickup at ${merchant.name}. After staff confirms fulfillment, Jiagon checks the paired Order Pass and opens the verified receipt claim.`
               : `This page pairs an Order Pass with this phone. It does not claim a receipt. After paying at ${merchant.name}, tap the physical NFC station to pick up the verified receipt.`}
           </p>
 
@@ -341,7 +341,7 @@ export default function TilePage() {
               <p>
                 {isNfcStation
                   ? activePass
-                    ? "Jiagon will open the receipt claim only after Raposa confirms payment."
+                    ? "Jiagon will open the receipt claim only after Raposa confirms fulfillment."
                     : "Open the pairing link from Telegram first, then tap this NFC station again."
                   : "This link only stores the Order Pass on this phone. The receipt pickup still requires the physical NFC station."}
               </p>
@@ -374,7 +374,7 @@ export default function TilePage() {
           </form>
 
           <form className="tile-order" onSubmit={submitOrder}>
-            <div className="tile-section-label">Demo order fallback</div>
+            <div className="tile-section-label">Manual order fallback</div>
             <div className="tile-order-head">
               <div>
                 <span>Order</span>
@@ -432,7 +432,7 @@ export default function TilePage() {
             {error ? <p className="tile-alert error">{error}</p> : null}
             {order ? (
               <p className="tile-alert success">
-                Order Pass #{order.pickupCode} is pending counter payment confirmation. Show this pass at pickup; receipt proof upgrades after staff taps Paid + Done.
+                Order Pass #{order.pickupCode} is pending merchant fulfillment. Show this pass at pickup; receipt proof upgrades after staff confirmation.
               </p>
             ) : null}
 

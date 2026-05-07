@@ -156,7 +156,7 @@ export async function POST(request: Request) {
               lastVerifiedVisit: signal.lastVerifiedVisit,
               latestReview: signal.latestReview,
               agentSignals: signal.latestAttributes,
-              caveat: "Merchant completion and customer claim are verified by Jiagon; payment proof is an optional additional signal and is not required for this rerank boost.",
+              caveat: "Merchant completion and passport claim are verified by Jiagon; payment proof is an optional additional signal and is not required for this rerank boost.",
             }
           : {
               matched: false,

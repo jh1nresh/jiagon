@@ -91,11 +91,11 @@ The app can still be used after the web station resolves a claim token.
 1. Staff opens web /merchant.
 2. Customer orders through Telegram or /tile/raposa-coffee.
 3. Staff takes normal counter payment.
-4. Staff taps Paid + Done.
+4. Staff marks the order fulfilled.
 5. Customer taps NFC station.
 6. Customer opens Jiagon mobile APK and enters/receives the claim token.
 7. Customer connects Solana wallet through Mobile Wallet Adapter.
-8. Customer claims receipt into Passport.
+8. Receipt is claimed into Passport.
 9. Customer mints Bubblegum receipt cNFT.
 10. App shows minted receipt and credit preview.
 ```
@@ -121,5 +121,5 @@ The app can still be used after the web station resolves a claim token.
 - Short paragraph:
 
 ```text
-Jiagon is a mobile receipt passport for crypto-native consumers. A customer can tap NFC at a merchant, claim a signed receipt, mint it as a Solana Bubblegum cNFT, and use verified receipt history as the input for purpose-bound credit.
+Jiagon mobile is the passport surface for verified purchase memory. A user or agent can tap NFC at a merchant, claim a signed receipt, mint it as a Solana Bubblegum cNFT, and use verified receipt history as the input for purpose-bound credit.
 ```

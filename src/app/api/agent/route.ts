@@ -25,7 +25,7 @@ export async function GET(request: Request) {
       agentDecisionProcess: [
         "Fetch coffee candidates from Google Places or another place graph.",
         "Send those candidates to /api/agent/rerank.",
-        "Prefer candidates with merchant-completed, customer-claimed, and Solana-minted receipt credentials.",
+        "Prefer candidates with merchant-completed, passport-claimed, and Solana-minted receipt credentials.",
         "Read agentSignals such as bestFor, valueRating, wouldReturn, and latest review text.",
         "Return a recommendation with a proof caveat if merchant identity is still user-claimed.",
       ],
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
         "Use Jiagon's demo merchant default when the user does not specify a shop.",
         "Let Jiagon match the intent to a Raposa Coffee menu item.",
         "Return only the user-visible pickup result plus payment approval step.",
-        "Track merchant Paid + Done and receipt claim so the user does not operate POS screens.",
+        "Track merchant fulfillment and receipt claim so the user does not operate POS screens.",
       ],
     },
   });
