@@ -36,6 +36,7 @@ export type ShopifyPaidOrderProof = {
     price: string;
   }>;
   jiagonOrderId: string | null;
+  jiagonMerchantId: string | null;
 };
 
 export function shopifyConfig() {
@@ -279,6 +280,7 @@ export function parseShopifyPaidOrderProof(input: {
   const jiagonOrderId = noteAttributeValue(root, "jiagon_order_id") ||
     stringValue(root.cart_token).match(/^ord-[a-f0-9]{16}$/i)?.[0] ||
     null;
+  const jiagonMerchantId = noteAttributeValue(root, "jiagon_merchant_id") || null;
 
   return {
     shopDomain: input.shopDomain,
@@ -292,6 +294,7 @@ export function parseShopifyPaidOrderProof(input: {
     paymentGatewayNames,
     lineItems,
     jiagonOrderId,
+    jiagonMerchantId,
   };
 }
 

@@ -9,6 +9,7 @@ const proofLevels = {
   A: "Verified payment plus merchant fulfillment plus passport claim.",
   B: "Bubblegum receipt cNFT minted from merchant-completed, passport-claimed receipt.",
   C: "Merchant-completed order receipt claimed into passport memory.",
+  L4: "Payment-backed order receipt from Shopify, MoonPay Commerce, or verified Solana Pay.",
   D: "Order intent only; not credit-grade until merchant completion.",
 };
 

@@ -5,6 +5,7 @@ type UnknownRecord = Record<string, unknown>;
 export type MoonPayCommercePaymentProof = {
   event: string;
   orderId: string | null;
+  jiagonMerchantId: string | null;
   merchantId: string | null;
   merchantName: string | null;
   transactionId: string;
@@ -205,6 +206,9 @@ export function parseMoonPayCommercePaymentProof(payload: unknown): MoonPayComme
   return {
     event,
     orderId,
+    jiagonMerchantId: stringValue(additionalJson?.jiagonMerchantId) ||
+      stringValue(additionalJson?.jiagon_merchant_id) ||
+      null,
     merchantId: stringValue(root.merchantId) ||
       stringValue(meta?.merchantId) ||
       stringValue(productDetails?.merchantId) ||
@@ -265,17 +269,21 @@ export function moonPayPaymentCurrencyError(proof: MoonPayCommercePaymentProof) 
 }
 
 export function moonPayDirectPaylinkError(proof: MoonPayCommercePaymentProof) {
+  return moonPayPaylinkAllowlistError(proof, "direct receipt");
+}
+
+export function moonPayPaylinkAllowlistError(proof: MoonPayCommercePaymentProof, context = "payment") {
   const allowedPaylinks = moonPayDirectPaylinkAllowlist();
   if (allowedPaylinks.length === 0) {
-    return "MoonPay Commerce direct receipts require MOONPAY_DIRECT_PAYLINK_ID or MOONPAY_COMMERCE_PAYLINK_ID.";
+    return `MoonPay Commerce ${context} requires MOONPAY_DIRECT_PAYLINK_ID or MOONPAY_COMMERCE_PAYLINK_ID.`;
   }
 
   const paylinkId = normalizePaylinkId(proof.paylinkId);
   if (!paylinkId) {
-    return "MoonPay Commerce direct receipt proof must include paylinkId or paymentLinkId.";
+    return `MoonPay Commerce ${context} proof must include paylinkId or paymentLinkId.`;
   }
   if (!allowedPaylinks.includes(paylinkId)) {
-    return "MoonPay Commerce direct receipt paylink is not approved for direct fallback.";
+    return `MoonPay Commerce ${context} paylink is not approved.`;
   }
 
   return null;

@@ -50,17 +50,15 @@ function verifiedPaymentFromGateways(gateways: string[]): {
   paymentProvider: MerchantOrderPaymentProvider;
   paymentStatus: Exclude<MerchantOrderPaymentStatus, "waiting_counter_payment" | "cancelled">;
 } {
-  const normalized = gateways.join(" ").toLowerCase();
-  if (normalized.includes("moonpay") || normalized.includes("helio") || normalized.includes("solana")) {
-    return {
-      paymentProvider: "moonpay_commerce",
-      paymentStatus: "moonpay_verified_paid",
-    };
-  }
+  void gateways;
   return {
     paymentProvider: "shopify",
     paymentStatus: "shopify_verified_paid",
   };
+}
+
+function normalizeShopDomain(value: string) {
+  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
 export async function POST(request: Request) {
@@ -84,6 +82,15 @@ export async function POST(request: Request) {
 
   const topic = request.headers.get("x-shopify-topic") || "orders/paid";
   const shopDomain = request.headers.get("x-shopify-shop-domain") || config.shopDomain;
+  if (normalizeShopDomain(shopDomain) !== normalizeShopDomain(config.shopDomain)) {
+    return Response.json(
+      {
+        error: "Shopify webhook shop domain does not match the configured merchant.",
+        shopDomain,
+      },
+      { status: 401 },
+    );
+  }
   if (topic !== "orders/paid") {
     return Response.json(
       {
@@ -125,6 +132,7 @@ export async function POST(request: Request) {
 
   const merchantId = shopifyMerchantId(proof.shopDomain);
   const verifiedPayment = verifiedPaymentFromGateways(proof.paymentGatewayNames);
+  const paidAmountCents = shopifyPaidOrderAmountCents(proof);
   if (proof.jiagonOrderId) {
     const orderReceipt = await completeMerchantOrderWithReceipt({
       id: proof.jiagonOrderId,
@@ -134,6 +142,8 @@ export async function POST(request: Request) {
       paymentStatus: verifiedPayment.paymentStatus,
       receiptPurpose: "shopify_paid_order_receipt",
       receiptMemo: shopifyReceiptMemo(proof),
+      minimumPaidCents: paidAmountCents,
+      expectedMerchantIds: [proof.jiagonMerchantId, merchantId].filter((value): value is string => Boolean(value)),
     });
 
     if (orderReceipt.order && orderReceipt.updated) {
@@ -151,6 +161,22 @@ export async function POST(request: Request) {
         order: publicMerchantOrder(orderReceipt.order),
       });
     }
+
+    const error = orderReceipt.error || "Shopify paid order could not attach a Jiagon receipt.";
+    return Response.json(
+      {
+        error,
+        product: "Jiagon Shopify paid-order receipt adapter",
+        shopifyProof: proof,
+        configured: orderReceipt.configured,
+        receiptPersistence: {
+          configured: orderReceipt.receiptConfigured,
+          persisted: orderReceipt.receiptPersisted,
+        },
+        order: orderReceipt.order ? publicMerchantOrder(orderReceipt.order) : null,
+      },
+      { status: orderReceipt.order ? 409 : 404 },
+    );
   }
 
   const receiptNumber = `shopify:${proof.shopDomain}:${proof.orderId}`;
@@ -169,8 +195,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const amountCents = shopifyPaidOrderAmountCents(proof);
-  if (amountCents <= 0) {
+  if (paidAmountCents <= 0) {
     return Response.json({ error: "Paid Shopify order amount must be greater than zero." }, { status: 422 });
   }
 
@@ -179,7 +204,7 @@ export async function POST(request: Request) {
     merchantName: proof.shopDomain,
     location: proof.shopDomain,
     receiptNumber,
-    amountCents,
+    amountCents: paidAmountCents,
     currency: proof.currency,
     category: shopifyLineItemCategory(proof),
     purpose: "shopify_paid_order_receipt",
