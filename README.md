@@ -1,7 +1,8 @@
 # Jiagon
 
-Jiagon is a real-world merchant negotiator agent for the YC Call My Agent
-Hackathon.
+Jiagon is an agent service/API for the YC Call My Agent Hackathon. It gives
+personal agents a narrow way to negotiate with supported merchants, create a
+feasible order handoff, and leave receipt proof after fulfillment.
 
 The product goal is narrow:
 
@@ -19,13 +20,13 @@ Live app: [jiagon.vercel.app](https://jiagon.vercel.app)
 ## Hackathon Positioning
 
 Jiagon is not a coffee chatbot, POS replacement, payment processor, or lending
-app. It is a negotiator/doer agent that coordinates with supported merchants and
-records proof after the work is completed.
+app. It is a merchant negotiator/doer agent exposed through API, CLI, and a
+merchant terminal. The website is only a demo, debug, and support surface.
 
 The receipt layer remains important, but for this YC demo it is the proof that
 the agent did real work, not the headline.
 
-## Demo Flow
+## Service Flow
 
 Primary Raposa Coffee flow:
 
@@ -50,14 +51,15 @@ User: "Find me a black MagSafe iPhone case under $90 and ship this week."
 
 ## Core Surfaces
 
-- `/` — YC-focused product overview.
-- `/agent-order` — live negotiator demo: natural language, quote, order handoff.
-- `/merchant` — merchant terminal for order fulfillment and receipt issuance.
-- `/passport` — receipt proof destination after fulfillment.
 - `/api/agent` and `/openapi.json` — agent-readable discovery.
+- `pnpm agent` — CLI path for the Call My Agent demo.
+- `/merchant` — merchant terminal for order fulfillment and receipt issuance.
+- `/agent-order` — demo/debug UI for natural language, quote, and order handoff.
+- `/` — positioning page, not the product surface.
 
 Demoted surfaces for this hackathon:
 
+- `/passport` — receipt proof support surface, not the first-run product.
 - `/credit` — future purpose-bound credit, not part of the YC demo spine.
 - `/trust-api` — infrastructure surface, not the first-run demo.
 - Solana Bubblegum, Shopify, MoonPay, Helio, and Solayer adapters — optional

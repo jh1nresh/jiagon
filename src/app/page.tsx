@@ -8,324 +8,289 @@ const orderCurl = `curl -X POST https://jiagon.vercel.app/api/agent/merchants/ra
   -H "content-type: application/json" \\
   -d '{"agentId":"yc-demo-agent","userIntent":"Get me an iced latte under $10, ready in 15 minutes","maxSpendUsd":"10.00","deadlineMinutes":15,"paymentMode":"pay_at_counter"}'`;
 
-const steps = [
-  ["01", "Understand intent", "A user asks for a real-world outcome, not a form submission."],
-  ["02", "Negotiate constraints", "Jiagon checks merchant capability, budget, time, stock, and alternatives."],
-  ["03", "Create the handoff", "If feasible, Jiagon creates the order pass and merchant-facing fulfillment task."],
-  ["04", "Leave proof", "Fulfillment creates a receipt trail the user and future agents can inspect."],
+const cliCommands = `pnpm agent "Get me an iced latte from Raposa under 10 dollars, ready in 15 minutes"
+pnpm agent "Find me a black MagSafe iPhone 16 case from SOLYD under $90 and ship this week"`;
+
+const serviceRows = [
+  ["1", "Quote", "Check merchant capability, budget, pickup window, stock, and alternatives."],
+  ["2", "Order", "Create the merchant handoff only when the quote is feasible."],
+  ["3", "Fulfill", "Staff accepts, prepares, and marks Paid + Done in the terminal."],
+  ["4", "Prove", "Jiagon returns a claimable receipt after the work is completed."],
 ];
 
-const merchants = [
-  {
-    name: "Raposa Coffee",
-    mode: "Pickup negotiator",
-    ask: "Iced latte under $10, ready in 15 minutes",
-    proof: "Pickup code, staff fulfillment, receipt claim",
-  },
-  {
-    name: "SOLYD",
-    mode: "Shopping negotiator",
-    ask: "Black MagSafe iPhone case, in stock, ship this week",
-    proof: "Stock quote, checkout handoff, payment-backed receipt later",
-  },
+const surfaces = [
+  ["/api/agent", "Agent API", "Discovery and endpoint map for personal agents."],
+  ["pnpm agent", "CLI", "Fastest live demo path for Call My Agent."],
+  ["/merchant", "Merchant terminal", "Staff queue for accepting and completing orders."],
+  ["/agent-order", "Request console", "Thin debug UI for quote and order calls."],
 ];
-
-function JiagonMark() {
-  return (
-    <div className="home-mark" aria-label="Jiagon">
-      <span>J</span>
-      <b>✓</b>
-    </div>
-  );
-}
 
 export default function Home() {
   return (
-    <main className="yc-home">
+    <main className="service-home">
       <style>{`
-        .yc-home {
+        .service-home {
           min-height: 100vh;
-          padding: 28px clamp(18px, 4vw, 56px) 56px;
-          background:
-            radial-gradient(circle at 14% 0%, oklch(0.98 0.008 105) 0 260px, transparent 430px),
-            linear-gradient(135deg, oklch(0.95 0.016 115) 0%, oklch(0.91 0.014 92) 58%, oklch(0.90 0.018 128) 100%);
+          padding: 24px clamp(18px, 4vw, 48px) 48px;
+          background: oklch(0.96 0.009 100);
+          color: var(--ink);
         }
-        .yc-shell { max-width: 1380px; margin: 0 auto; }
-        .yc-top {
+        .service-shell {
+          max-width: 1180px;
+          margin: 0 auto;
+        }
+        .service-top {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 20px;
-          margin-bottom: 42px;
+          padding-bottom: 18px;
+          border-bottom: .5px solid var(--rule);
         }
-        .yc-brand { display: flex; align-items: center; gap: 14px; }
-        .yc-wordmark {
+        .service-brand {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .service-mark {
+          width: 44px;
+          height: 44px;
+          display: grid;
+          place-items: center;
+          border: 2px solid var(--verified);
+          border-radius: 8px;
+          background: var(--receipt);
+          color: var(--verified);
+          font-family: Georgia, serif;
+          font-size: 30px;
+          font-weight: 800;
+          line-height: 1;
+        }
+        .service-wordmark {
           font-family: var(--display);
-          font-size: 42px;
+          font-size: 32px;
           line-height: .9;
           color: var(--verified);
         }
-        .yc-sub,
-        .yc-kicker,
-        .yc-label {
+        .service-sub,
+        .service-label,
+        .service-kicker {
           font-family: var(--mono);
           font-size: 10px;
-          letter-spacing: .9px;
+          letter-spacing: .8px;
           text-transform: uppercase;
           color: var(--ink-muted);
         }
-        .yc-sub { margin-top: 5px; }
-        .yc-nav {
+        .service-sub { margin-top: 5px; }
+        .service-nav {
           display: flex;
           flex-wrap: wrap;
+          justify-content: flex-end;
           gap: 8px;
-          padding: 6px;
-          border: .5px solid var(--rule);
-          border-radius: 8px;
-          background: oklch(0.985 0.005 95 / .72);
-          backdrop-filter: blur(16px);
         }
-        .yc-nav a {
+        .service-nav a,
+        .service-link {
           min-height: 34px;
           display: inline-flex;
           align-items: center;
-          padding: 0 12px;
-          border-radius: 6px;
-          color: var(--ink-muted);
+          padding: 0 11px;
+          border: .5px solid var(--rule);
+          border-radius: 7px;
+          background: var(--receipt);
+          color: var(--ink);
           font-size: 13px;
-          font-weight: 800;
+          font-weight: 850;
           text-decoration: none;
         }
-        .yc-nav a:hover { background: var(--verified-soft); color: var(--verified); }
-        .yc-hero {
+        .service-summary {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(360px, 520px);
-          gap: 18px;
-          align-items: stretch;
+          grid-template-columns: minmax(0, 1fr) minmax(320px, .6fr);
+          gap: 22px;
+          align-items: start;
+          padding: 34px 0 26px;
+          border-bottom: .5px solid var(--rule);
         }
-        .yc-card {
+        .service-title {
+          max-width: 720px;
+          margin: 8px 0 0;
+          font-size: clamp(34px, 5vw, 56px);
+          line-height: 1;
+          letter-spacing: 0;
+          color: var(--ink);
+        }
+        .service-copy {
+          max-width: 720px;
+          margin: 14px 0 0;
+          color: var(--ink-muted);
+          font-size: 16px;
+          line-height: 1.55;
+        }
+        .service-runbook {
+          display: grid;
+          gap: 8px;
           border: .5px solid var(--rule);
           border-radius: 8px;
           background: var(--receipt);
-          padding: 18px;
-          box-shadow: 0 1px 0 rgba(24,24,24,.05), 0 8px 24px rgba(24,24,24,.045);
-        }
-        .yc-card.dark { background: var(--panel); color: var(--panel-text); border-color: oklch(0.34 0.03 135); }
-        .yc-title {
-          max-width: 900px;
-          margin: 10px 0 0;
-          font-family: var(--display);
-          font-size: clamp(50px, 8vw, 104px);
-          line-height: .9;
-          font-weight: 400;
-          font-style: italic;
-          color: var(--ink);
-        }
-        .yc-copy {
-          max-width: 760px;
-          margin: 18px 0 0;
-          color: var(--ink-muted);
-          font-size: 17px;
-          line-height: 1.55;
-        }
-        .yc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
-        .yc-button {
-          min-height: 44px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          padding: 0 16px;
-          border-radius: 8px;
-          border: .5px solid var(--verified);
-          background: var(--verified);
-          color: var(--panel-text);
-          font-weight: 900;
-          text-decoration: none;
-        }
-        .yc-button.secondary { background: var(--surface); color: var(--ink); border-color: var(--rule); }
-        .yc-steps { display: grid; gap: 10px; margin-top: 16px; }
-        .yc-step {
-          display: grid;
-          grid-template-columns: 42px 1fr;
-          gap: 12px;
           padding: 12px;
-          border: .5px solid var(--rule);
-          border-radius: 8px;
-          background: oklch(0.985 0.005 95 / .68);
         }
-        .yc-step code {
+        .service-runbook div {
+          display: grid;
+          grid-template-columns: 28px 1fr;
+          gap: 10px;
+          align-items: start;
+          padding: 9px;
+          border-radius: 7px;
+          background: var(--surface);
+        }
+        .service-runbook code {
           font-family: var(--mono);
           color: var(--verified);
           font-size: 11px;
         }
-        .yc-step strong { display: block; font-size: 14px; }
-        .yc-step span { display: block; color: var(--ink-muted); font-size: 13px; line-height: 1.4; margin-top: 3px; }
-        .yc-grid {
+        .service-runbook strong {
+          display: block;
+          font-size: 14px;
+        }
+        .service-runbook span {
+          display: block;
+          margin-top: 3px;
+          color: var(--ink-muted);
+          font-size: 13px;
+          line-height: 1.4;
+        }
+        .service-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
           gap: 18px;
-          margin-top: 18px;
+          margin-top: 22px;
         }
-        .yc-panel-title {
-          margin: 8px 0 0;
-          font-family: var(--display);
-          font-style: italic;
-          font-weight: 400;
-          font-size: 34px;
-          line-height: .95;
-        }
-        .yc-merchant-list { display: grid; gap: 10px; margin-top: 16px; }
-        .yc-merchant {
-          padding: 14px;
-          border-radius: 8px;
+        .service-panel {
           border: .5px solid var(--rule);
+          border-radius: 8px;
+          background: var(--receipt);
+          padding: 16px;
+        }
+        .service-panel h2 {
+          margin: 7px 0 0;
+          font-size: 22px;
+          line-height: 1.1;
+          color: var(--ink);
+        }
+        .service-table {
+          display: grid;
+          gap: 8px;
+          margin-top: 14px;
+        }
+        .service-row {
+          display: grid;
+          grid-template-columns: 120px 1fr;
+          gap: 12px;
+          padding: 11px;
+          border: .5px solid var(--rule);
+          border-radius: 7px;
           background: var(--surface);
         }
-        .yc-merchant strong { display: block; color: var(--ink); }
-        .yc-merchant p { margin: 6px 0 0; color: var(--ink-muted); font-size: 13px; line-height: 1.45; }
-        .yc-code {
-          margin: 14px 0 0;
-          padding: 16px;
-          border-radius: 8px;
-          border: .5px solid oklch(0.38 0.03 135);
+        .service-row strong {
+          font-size: 13px;
+          color: var(--ink);
+        }
+        .service-row span {
+          color: var(--ink-muted);
+          font-size: 13px;
+          line-height: 1.4;
+        }
+        .service-code {
+          margin: 12px 0 0;
+          padding: 13px;
+          border-radius: 7px;
           background: oklch(0.21 0.026 135);
           color: var(--panel-text);
           font-family: var(--mono);
-          font-size: 12px;
-          line-height: 1.7;
+          font-size: 11px;
+          line-height: 1.65;
           overflow: auto;
           white-space: pre-wrap;
         }
-        .yc-pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-        .yc-pill {
-          display: inline-flex;
-          align-items: center;
-          min-height: 28px;
-          padding: 0 9px;
-          border-radius: 6px;
-          border: .5px solid color-mix(in oklch, var(--verified) 34%, var(--rule));
-          background: var(--verified-soft);
-          color: var(--verified);
-          font-family: var(--mono);
-          font-size: 10px;
-          font-weight: 900;
-          letter-spacing: .3px;
-          text-transform: uppercase;
+        .service-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 18px;
         }
-        .home-mark {
-          width: 56px;
-          height: 56px;
-          position: relative;
-          display: grid;
-          place-items: center;
-          flex: 0 0 auto;
-          border: 3px solid var(--verified);
-          border-radius: 10px;
-          background: var(--receipt);
-          color: var(--verified);
-          font-family: Georgia, serif;
-          font-size: 39px;
-          font-weight: 800;
-          line-height: .9;
-          box-shadow: 0 10px 24px rgba(24,58,38,.10);
-        }
-        .home-mark b {
-          position: absolute;
-          right: -7px;
-          top: -7px;
-          width: 23px;
-          height: 23px;
-          display: grid;
-          place-items: center;
-          border-radius: 999px;
-          background: oklch(0.16 0.01 95);
-          color: white;
-          font-size: 14px;
-          font-family: var(--ui);
-        }
-        @media (max-width: 980px) {
-          .yc-top,
-          .yc-hero { display: block; }
-          .yc-nav { margin-top: 18px; }
-          .yc-card + .yc-card { margin-top: 18px; }
-          .yc-grid { grid-template-columns: 1fr; }
+        @media (max-width: 900px) {
+          .service-top,
+          .service-summary { display: block; }
+          .service-nav,
+          .service-runbook { margin-top: 16px; }
+          .service-grid,
+          .service-row { grid-template-columns: 1fr; }
         }
       `}</style>
 
-      <div className="yc-shell">
-        <header className="yc-top">
-          <div className="yc-brand">
-            <JiagonMark />
+      <div className="service-shell">
+        <header className="service-top">
+          <div className="service-brand">
+            <div className="service-mark">J</div>
             <div>
-              <div className="yc-wordmark">Jiagon</div>
-              <div className="yc-sub">Merchant negotiator agent</div>
+              <div className="service-wordmark">Jiagon</div>
+              <div className="service-sub">Agent service for merchant orders</div>
             </div>
           </div>
-          <nav className="yc-nav" aria-label="Jiagon demo navigation">
-            <Link href="/agent-order">Live Demo</Link>
-            <Link href="/merchant">Merchant Queue</Link>
-            <Link href="/passport">Receipts</Link>
+          <nav className="service-nav" aria-label="Jiagon service navigation">
             <Link href="/api/agent">Agent API</Link>
+            <Link href="/agent-order">Request Console</Link>
+            <Link href="/merchant">Merchant Terminal</Link>
           </nav>
         </header>
 
-        <section className="yc-hero">
-          <div className="yc-card">
-            <div className="yc-kicker">YC Call My Agent Hackathon</div>
-            <h1 className="yc-title">An agent that gets merchant errands done.</h1>
-            <p className="yc-copy">
-              Jiagon turns a user request into a real merchant negotiation: it checks capability,
-              price, time, stock, and fulfillment before creating the order handoff. The receipt is
-              not the pitch; it is the proof that the agent completed useful work.
+        <section className="service-summary">
+          <div>
+            <div className="service-kicker">YC Call My Agent Hackathon</div>
+            <h1 className="service-title">Merchant order API for personal agents.</h1>
+            <p className="service-copy">
+              Jiagon is not a consumer website. It is a service contract that lets an agent
+              quote merchant constraints, create a feasible handoff, and leave proof after
+              the merchant completes the work.
             </p>
-            <div className="yc-actions">
-              <Link className="yc-button" href="/agent-order">Run the negotiator</Link>
-              <Link className="yc-button secondary" href="/merchant">Open merchant terminal</Link>
-            </div>
-            <div className="yc-pill-row" aria-label="Demo scope">
-              <span className="yc-pill">Doer</span>
-              <span className="yc-pill">Negotiator</span>
-              <span className="yc-pill">Real-world merchant handoff</span>
-              <span className="yc-pill">Receipt as proof</span>
+            <div className="service-actions">
+              <Link className="service-link" href="/api/agent">Inspect API</Link>
+              <Link className="service-link" href="/merchant">Open terminal</Link>
             </div>
           </div>
 
-          <aside className="yc-card">
-            <div className="yc-kicker">What the agent does</div>
-            <div className="yc-steps">
-              {steps.map(([number, title, body]) => (
-                <div className="yc-step" key={number}>
-                  <code>{number}</code>
-                  <div>
-                    <strong>{title}</strong>
-                    <span>{body}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </aside>
+          <div className="service-runbook" aria-label="Service flow">
+            {serviceRows.map(([number, title, body]) => (
+              <div key={number}>
+                <code>{number}</code>
+                <span>
+                  <strong>{title}</strong>
+                  {body}
+                </span>
+              </div>
+            ))}
+          </div>
         </section>
 
-        <section className="yc-grid">
-          <div className="yc-card">
-            <div className="yc-kicker">First merchant targets</div>
-            <h2 className="yc-panel-title">Cafe pickup and commerce shipping.</h2>
-            <div className="yc-merchant-list">
-              {merchants.map((merchant) => (
-                <div className="yc-merchant" key={merchant.name}>
-                  <strong>{merchant.name} · {merchant.mode}</strong>
-                  <p><b>Ask:</b> {merchant.ask}</p>
-                  <p><b>Proof:</b> {merchant.proof}</p>
+        <section className="service-grid">
+          <div className="service-panel">
+            <div className="service-kicker">Core surfaces</div>
+            <h2>Use the API, CLI, and merchant terminal.</h2>
+            <div className="service-table">
+              {surfaces.map(([path, title, body]) => (
+                <div className="service-row" key={path}>
+                  <strong>{path}</strong>
+                  <span>{title}: {body}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="yc-card dark">
-            <div className="yc-kicker">Agent calls</div>
-            <h2 className="yc-panel-title">Quote first. Order only if feasible.</h2>
-            <pre className="yc-code">{quoteCurl}</pre>
-            <pre className="yc-code">{orderCurl}</pre>
+          <div className="service-panel">
+            <div className="service-kicker">Smoke commands</div>
+            <h2>Quote first. Order only if feasible.</h2>
+            <pre className="service-code">{quoteCurl}</pre>
+            <pre className="service-code">{orderCurl}</pre>
+            <pre className="service-code">{cliCommands}</pre>
           </div>
         </section>
       </div>

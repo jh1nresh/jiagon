@@ -84,21 +84,6 @@ type PilotMetrics = {
   estimatedGmvUsd: string;
 };
 
-type CreditMemo = {
-  merchantId: string;
-  merchantName: string;
-  title: string;
-  telegramOrders: number;
-  merchantCompleted: number;
-  customerClaimed: number;
-  receiptGatedReviews: number;
-  estimatedGmvUsd: string;
-  proofLevel: string;
-  suggestedNextProofUpgrade: string;
-  suggestedPurposeCredit: string;
-  note: string;
-};
-
 type MerchantOrdersResponse = {
   mode?: string;
   orders?: MerchantOrder[];
@@ -114,11 +99,6 @@ type MerchantOrdersResponse = {
 
 type PilotMetricsResponse = {
   metrics?: PilotMetrics;
-  error?: string;
-};
-
-type CreditMemoResponse = {
-  memo?: CreditMemo;
   error?: string;
 };
 
@@ -190,7 +170,6 @@ export default function MerchantPage() {
   const [orderQrUrls, setOrderQrUrls] = useState<Record<string, string>>({});
   const [copiedOrderId, setCopiedOrderId] = useState("");
   const [pilotMetrics, setPilotMetrics] = useState<PilotMetrics | null>(null);
-  const [creditMemo, setCreditMemo] = useState<CreditMemo | null>(null);
   const [pilotBusy, setPilotBusy] = useState(false);
   const [pilotError, setPilotError] = useState("");
   const [demoReadiness, setDemoReadiness] = useState<DemoReadinessResponse | null>(null);
@@ -270,36 +249,18 @@ export default function MerchantPage() {
       const query = new URLSearchParams({
         merchantId: form.merchantId,
       });
-      const memoQuery = new URLSearchParams({
-        merchantId: form.merchantId,
-        merchantName: form.merchantName,
+      const metricsResponse = await fetch(`/api/merchant/pilot-metrics?${query.toString()}`, {
+        headers: orderHeaders(),
       });
-
-      const [metricsResponse, memoResponse] = await Promise.all([
-        fetch(`/api/merchant/pilot-metrics?${query.toString()}`, {
-          headers: orderHeaders(),
-        }),
-        fetch(`/api/merchant/credit-memo?${memoQuery.toString()}`, {
-          headers: orderHeaders(),
-        }),
-      ]);
-      const [metricsPayload, memoPayload] = await Promise.all([
-        metricsResponse.json() as Promise<PilotMetricsResponse>,
-        memoResponse.json() as Promise<CreditMemoResponse>,
-      ]);
+      const metricsPayload = await metricsResponse.json() as PilotMetricsResponse;
 
       if (!metricsResponse.ok) {
         throw new Error(metricsPayload.error || "Unable to load pilot metrics.");
       }
-      if (!memoResponse.ok) {
-        throw new Error(memoPayload.error || "Unable to load credit memo.");
-      }
 
       setPilotMetrics(metricsPayload.metrics || null);
-      setCreditMemo(memoPayload.memo || null);
     } catch (loadError) {
       setPilotMetrics(null);
-      setCreditMemo(null);
       setPilotError(loadError instanceof Error ? loadError.message : "Unable to load pilot summary.");
     } finally {
       setPilotBusy(false);
@@ -534,179 +495,59 @@ export default function MerchantPage() {
             <span>Jiagon</span>
           </a>
           <nav>
-            <a href="/agent-order">Agent Demo</a>
-            <a href="/merchant">Merchant Queue</a>
-            <a href="/passport">Receipt Proof</a>
+            <a href="/agent-order">Agent Console</a>
+            <a href="/api/agent">Agent API</a>
+            <a href="/merchant">Terminal</a>
           </nav>
         </header>
 
         <div className="merchant-grid">
           <section className="merchant-copy">
-            <div className="merchant-kicker">Merchant terminal</div>
-            <h1>Fulfill the agent's real-world order.</h1>
+            <div className="merchant-kicker">Merchant operator terminal</div>
+            <h1>Accept, prepare, and attest the order.</h1>
             <p>
-              Jiagon does not replace the merchant POS. It gives staff a lightweight action surface:
-              receive a negotiated agent order, mark it paid and done, issue proof, and let the
-              customer claim the receipt after fulfillment.
+              This is the staff surface for the YC demo. Jiagon handles quote and order creation;
+              the merchant only needs to move the order through fulfillment and mark Paid + Done.
             </p>
             <div className="merchant-flow">
-              <span>User agent</span>
-              <span>Jiagon quote</span>
-              <span>Merchant handoff</span>
+              <span>Agent quote</span>
+              <span>Order pass</span>
+              <span>Accept</span>
               <span>Paid + Done</span>
-              <span>Receipt proof</span>
+              <span>Claim link</span>
             </div>
           </section>
 
-          <section className="merchant-card">
-            <div className="merchant-form-grid">
-              <label>
-                <span>Merchant</span>
-                <input value={form.merchantName} onChange={(event) => update("merchantName", event.target.value)} />
-              </label>
-              <label>
-                <span>Merchant slug</span>
-                <input value={form.merchantId} onChange={(event) => update("merchantId", event.target.value)} />
-              </label>
-              <label>
-                <span>Amount USD</span>
-                <input inputMode="decimal" value={form.amountUsd} onChange={(event) => update("amountUsd", event.target.value)} />
-              </label>
-              <label>
-                <span>Receipt id</span>
-                <input value={form.receiptNumber} onChange={(event) => update("receiptNumber", event.target.value)} />
-              </label>
-              <label>
-                <span>Category</span>
-                <input value={form.category} onChange={(event) => update("category", event.target.value)} />
-              </label>
-              <label>
-                <span>Purpose</span>
-                <input value={form.purpose} onChange={(event) => update("purpose", event.target.value)} />
-              </label>
-              <label>
-                <span>Location</span>
-                <input value={form.location} onChange={(event) => update("location", event.target.value)} />
-              </label>
-              <label>
-                <span>Issued by</span>
-                <input value={form.issuedBy} onChange={(event) => update("issuedBy", event.target.value)} />
-              </label>
-              <label className="merchant-wide">
-                <span>Memo</span>
-                <textarea value={form.memo} onChange={(event) => update("memo", event.target.value)} />
-              </label>
-              <label className="merchant-wide">
-                <span>Issuer key</span>
-                <input
-                  type="password"
-                  autoComplete="off"
-                  placeholder="Required outside local demo mode"
-                  value={issuerKey}
-                  onChange={(event) => setIssuerKey(event.target.value)}
-                />
-              </label>
-            </div>
-
-            {error && <div className="merchant-error">{error}</div>}
-
-            <button className="merchant-primary" type="button" disabled={!canSubmit} onClick={issueReceipt}>
-              {busy ? "Issuing receipt..." : "Issue receipt"}
-            </button>
-          </section>
-        </div>
-
-        <section className="merchant-readiness-panel">
-          <div className="merchant-readiness-top">
+          <section className="merchant-card merchant-runbook">
             <div>
-              <div className="merchant-kicker">Demo readiness</div>
-              <h2>Call My Agent operator checks</h2>
+              <div className="merchant-kicker">Live operator path</div>
+              <h2>Keep this tab open during the demo.</h2>
               <p>
-                Verify the live demo can run from agent request to quote, merchant order, staff fulfillment,
-                and receipt claim. Optional Solana/payment proof checks are secondary for this hackathon.
+                The user-facing website is not the product. The product is the API contract
+                between a personal agent and the merchant terminal.
               </p>
             </div>
-            <button type="button" onClick={loadDemoReadiness} disabled={readinessBusy}>
-              {readinessBusy ? "Checking..." : "Refresh checks"}
-            </button>
-          </div>
-          {readinessError && <div className="merchant-error">{readinessError}</div>}
-          <div className="merchant-readiness-summary">
-            <span>{demoReadiness?.overall?.ready ? "Ready" : "Needs setup"}</span>
-            <strong>
-              {`${demoReadiness?.overall?.readyCount ?? 0}/${demoReadiness?.overall?.total ?? 0}`}
-            </strong>
-          </div>
-          <div className="merchant-readiness-grid">
-            {(demoReadiness?.checks || []).map((check) => (
-              <article className="merchant-readiness-card" data-status={check.status} key={check.id}>
-                <div>
-                  <span>{check.label}</span>
-                  <strong>{check.status === "ready" ? "Ready" : check.status === "blocked" ? "Blocked" : "Missing setup"}</strong>
-                </div>
-                <p>{check.detail}</p>
-                <code>{check.mode}</code>
-                {check.diagnostics?.length ? (
-                  <ul>
-                    {check.diagnostics.map((item, index) => (
-                      <li key={`${check.id}-${index}`}>
-                        {item.label}: {item.value}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {check.missingCount > 0 && <small>{check.missingCount} setup item{check.missingCount === 1 ? "" : "s"} missing</small>}
-              </article>
-            ))}
-            {!demoReadiness?.checks?.length && !readinessError && (
-              <article className="merchant-readiness-card" data-status="missing">
-                <div>
-                  <span>Checks</span>
-                  <strong>{readinessBusy ? "Loading" : "Not loaded"}</strong>
-                </div>
-                <p>Refresh to inspect Telegram, persistence, receipt signing, and optional proof-adapter configuration.</p>
-              </article>
-            )}
-          </div>
-        </section>
-
-        <section className="merchant-setup-panel">
-          <div>
-            <div className="merchant-kicker">Merchant onboarding</div>
-            <h2>Set up a merchant negotiator pilot</h2>
-            <p>
-              Use these URLs for a cafe or commerce pilot. Let agents create negotiated order passes,
-              then keep this terminal open so staff can mark fulfillment and issue proof.
-            </p>
-          </div>
-          <div className="merchant-setup-grid">
-            {[
-              ["Dashboard", merchantSetup.dashboardUrl],
-              ["Customer tile", merchantSetup.customerTileUrl],
-              ["NFC station", merchantSetup.nfcStationUrl],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <span>{label}</span>
-                <code>{value}</code>
-              </div>
-            ))}
-          </div>
-          <div className="merchant-setup-flow">
-            <span>1. Configure merchant</span>
-            <span>2. Share agent/tile entry</span>
-            <span>3. Write NFC station URL</span>
-            <span>4. Staff marks fulfilled</span>
-          </div>
-        </section>
+            <ol>
+              <li>Agent calls quote and refuses impossible constraints.</li>
+              <li>Agent creates the order only when the quote is feasible.</li>
+              <li>Staff moves the order to Paid + Done in this terminal.</li>
+              <li>Jiagon returns a claimable receipt as proof of completed work.</li>
+            </ol>
+            <div className="merchant-runbook-actions">
+              <a href="/agent-order">Open agent console</a>
+              <a href="/api/agent">Inspect agent API</a>
+            </div>
+          </section>
+        </div>
 
         <section className="merchant-order-panel">
           <div className="merchant-order-top">
             <div>
-              <div className="merchant-kicker">Agent order queue</div>
-              <h2>Incoming negotiated orders</h2>
+              <div className="merchant-kicker">Order queue</div>
+              <h2>Incoming agent orders</h2>
               <p>
-                Orders from personal agents start as quote-checked intent. The merchant action is the
-                real-world attestation that lets Jiagon say the agent actually got the job done.
+                Every row has already passed quote checks. Staff only accepts, prepares, completes,
+                or cancels the real-world handoff.
               </p>
             </div>
             <div className="merchant-order-controls">
@@ -767,26 +608,6 @@ export default function MerchantPage() {
               <strong>${pilotMetrics?.estimatedGmvUsd ?? "0.00"}</strong>
             </div>
           </div>
-
-          {creditMemo && (
-            <section className="merchant-credit-memo">
-              <div>
-                <div className="merchant-kicker">Post-demo memo</div>
-                <h3>{creditMemo.proofLevel}</h3>
-                <p>{creditMemo.note}</p>
-              </div>
-              <div className="merchant-credit-memo-grid">
-                <div>
-                  <span>Next proof</span>
-                  <strong>{creditMemo.suggestedNextProofUpgrade}</strong>
-                </div>
-                <div>
-                  <span>Future credit</span>
-                  <strong>{creditMemo.suggestedPurposeCredit}</strong>
-                </div>
-              </div>
-            </section>
-          )}
 
           {ordersError && <div className="merchant-error">{ordersError}</div>}
           {pilotError && <div className="merchant-error">{pilotError}</div>}
@@ -892,6 +713,154 @@ export default function MerchantPage() {
           {ordersMode && <div className="merchant-queue-mode">Storage: {ordersMode}</div>}
         </section>
 
+        <section className="merchant-readiness-panel">
+          <div className="merchant-readiness-top">
+            <div>
+              <div className="merchant-kicker">Operator checks</div>
+              <h2>Can the service run today?</h2>
+              <p>
+                Verify the live path: agent quote, order handoff, merchant fulfillment, and claimable
+                receipt. Payment and onchain proof adapters are optional.
+              </p>
+            </div>
+            <button type="button" onClick={loadDemoReadiness} disabled={readinessBusy}>
+              {readinessBusy ? "Checking..." : "Refresh checks"}
+            </button>
+          </div>
+          {readinessError && <div className="merchant-error">{readinessError}</div>}
+          <div className="merchant-readiness-summary">
+            <span>{demoReadiness?.overall?.ready ? "Ready" : "Needs setup"}</span>
+            <strong>
+              {`${demoReadiness?.overall?.readyCount ?? 0}/${demoReadiness?.overall?.total ?? 0}`}
+            </strong>
+          </div>
+          <div className="merchant-readiness-grid">
+            {(demoReadiness?.checks || []).map((check) => (
+              <article className="merchant-readiness-card" data-status={check.status} key={check.id}>
+                <div>
+                  <span>{check.label}</span>
+                  <strong>{check.status === "ready" ? "Ready" : check.status === "blocked" ? "Blocked" : "Missing setup"}</strong>
+                </div>
+                <p>{check.detail}</p>
+                <code>{check.mode}</code>
+                {check.diagnostics?.length ? (
+                  <ul>
+                    {check.diagnostics.map((item, index) => (
+                      <li key={`${check.id}-${index}`}>
+                        {item.label}: {item.value}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {check.missingCount > 0 && <small>{check.missingCount} setup item{check.missingCount === 1 ? "" : "s"} missing</small>}
+              </article>
+            ))}
+            {!demoReadiness?.checks?.length && !readinessError && (
+              <article className="merchant-readiness-card" data-status="missing">
+                <div>
+                  <span>Checks</span>
+                  <strong>{readinessBusy ? "Loading" : "Not loaded"}</strong>
+                </div>
+                <p>Refresh to inspect Telegram, persistence, receipt signing, and optional proof-adapter configuration.</p>
+              </article>
+            )}
+          </div>
+        </section>
+
+        <section className="merchant-setup-panel">
+          <div>
+            <div className="merchant-kicker">Service links</div>
+            <h2>Connect this merchant to agents</h2>
+            <p>
+              These are the only URLs a pilot merchant needs: the terminal for staff, an optional
+              customer tile, and a claim station for QR/NFC demos.
+            </p>
+          </div>
+          <div className="merchant-setup-grid">
+            {[
+              ["Dashboard", merchantSetup.dashboardUrl],
+              ["Customer tile", merchantSetup.customerTileUrl],
+              ["NFC station", merchantSetup.nfcStationUrl],
+            ].map(([label, value]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <code>{value}</code>
+              </div>
+            ))}
+          </div>
+          <div className="merchant-setup-flow">
+            <span>1. Configure merchant</span>
+            <span>2. Share agent/tile entry</span>
+            <span>3. Write NFC station URL</span>
+            <span>4. Staff marks fulfilled</span>
+          </div>
+        </section>
+
+        <section className="merchant-card merchant-manual-panel">
+          <div>
+            <div className="merchant-kicker">Manual receipt fallback</div>
+            <h2>Issue proof without an agent order</h2>
+            <p>
+              Keep this below the main queue. It is useful for debugging receipts, but it is not
+              the primary Call My Agent flow.
+            </p>
+          </div>
+          <div className="merchant-form-grid">
+            <label>
+              <span>Merchant</span>
+              <input value={form.merchantName} onChange={(event) => update("merchantName", event.target.value)} />
+            </label>
+            <label>
+              <span>Merchant slug</span>
+              <input value={form.merchantId} onChange={(event) => update("merchantId", event.target.value)} />
+            </label>
+            <label>
+              <span>Amount USD</span>
+              <input inputMode="decimal" value={form.amountUsd} onChange={(event) => update("amountUsd", event.target.value)} />
+            </label>
+            <label>
+              <span>Receipt id</span>
+              <input value={form.receiptNumber} onChange={(event) => update("receiptNumber", event.target.value)} />
+            </label>
+            <label>
+              <span>Category</span>
+              <input value={form.category} onChange={(event) => update("category", event.target.value)} />
+            </label>
+            <label>
+              <span>Purpose</span>
+              <input value={form.purpose} onChange={(event) => update("purpose", event.target.value)} />
+            </label>
+            <label>
+              <span>Location</span>
+              <input value={form.location} onChange={(event) => update("location", event.target.value)} />
+            </label>
+            <label>
+              <span>Issued by</span>
+              <input value={form.issuedBy} onChange={(event) => update("issuedBy", event.target.value)} />
+            </label>
+            <label className="merchant-wide">
+              <span>Memo</span>
+              <textarea value={form.memo} onChange={(event) => update("memo", event.target.value)} />
+            </label>
+            <label className="merchant-wide">
+              <span>Issuer key</span>
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder="Required outside local demo mode"
+                value={issuerKey}
+                onChange={(event) => setIssuerKey(event.target.value)}
+              />
+            </label>
+          </div>
+
+          {error && <div className="merchant-error">{error}</div>}
+
+          <button className="merchant-primary" type="button" disabled={!canSubmit} onClick={issueReceipt}>
+            {busy ? "Issuing receipt..." : "Issue receipt"}
+          </button>
+        </section>
+
         {issued && (
           <section className="merchant-result">
             <div>
@@ -953,17 +922,19 @@ const merchantEnhancementStyles = `
 .merchant-pilot-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:.5px solid var(--rule);border-radius:10px;overflow:hidden;background:oklch(0.985 0.005 95 / .68)}
 .merchant-pilot-grid div{display:grid;gap:5px;padding:12px;border-right:.5px solid var(--rule)}
 .merchant-pilot-grid div:last-child{border-right:none}
-.merchant-pilot-grid span,.merchant-credit-memo-grid span{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-muted)}
+.merchant-pilot-grid span{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-muted)}
 .merchant-pilot-grid strong{font-size:23px;line-height:1;color:var(--ink)}
-.merchant-credit-memo{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.85fr);gap:14px;align-items:center;border:.5px solid var(--rule);border-radius:10px;background:oklch(0.96 0.026 145 / .58);padding:14px}
-.merchant-credit-memo h3{margin:5px 0 0;font-family:var(--mono);font-size:14px;letter-spacing:.3px;color:var(--verified)}
-.merchant-credit-memo p{margin:7px 0 0!important}
-.merchant-credit-memo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.merchant-credit-memo-grid div{display:grid;gap:5px;border:.5px solid var(--rule);border-radius:8px;background:var(--receipt);padding:10px}
-.merchant-credit-memo-grid strong{font-size:13px;line-height:1.35;color:var(--ink)}
 .merchant-order-main>div{flex-wrap:wrap}
 .merchant-pickup-code{display:inline-flex;align-items:center;min-height:24px;border-radius:999px;padding:0 8px;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.5px;background:var(--verified);color:var(--panel-text)}
 .merchant-order-claim small{display:block;margin-top:8px;font-size:11px;color:var(--verified)}
+.merchant-runbook{display:grid;gap:14px}
+.merchant-runbook h2,.merchant-manual-panel h2{margin:6px 0 0;font-family:var(--display);font-style:italic;font-weight:400;font-size:36px;line-height:.95;color:var(--ink)}
+.merchant-runbook p,.merchant-manual-panel p{margin:8px 0 0;color:var(--ink-muted);font-size:14px;line-height:1.45}
+.merchant-runbook ol{display:grid;gap:8px;margin:0;padding-left:20px;color:var(--ink-muted);font-size:14px;line-height:1.45}
+.merchant-runbook-actions{display:flex;flex-wrap:wrap;gap:8px}
+.merchant-runbook-actions a{min-height:38px;display:inline-flex;align-items:center;border:.5px solid var(--rule);border-radius:8px;background:var(--receipt);color:var(--ink);padding:0 12px;font-size:13px;font-weight:900;text-decoration:none}
+.merchant-runbook-actions a:first-child{background:var(--verified);color:var(--panel-text);border:none}
+.merchant-manual-panel{margin-top:26px;display:grid;gap:16px}
 .merchant-readiness-top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start}
 .merchant-readiness-top button{min-height:40px;border:none;border-radius:8px;background:var(--verified);color:var(--panel-text);padding:0 13px;font-weight:900;cursor:pointer}
 .merchant-readiness-top button:disabled{opacity:.58;cursor:not-allowed}
@@ -988,5 +959,5 @@ const merchantEnhancementStyles = `
 .merchant-setup-grid code{overflow:auto;border:.5px solid var(--rule);border-radius:7px;background:var(--receipt);padding:8px;font-family:var(--mono);font-size:10px;color:var(--verified)}
 .merchant-setup-flow{display:flex;flex-wrap:wrap;gap:8px}
 .merchant-setup-flow span{border:.5px solid var(--rule);border-radius:999px;background:var(--receipt);padding:8px 10px;color:var(--verified)}
-@media(max-width:900px){.merchant-pilot-grid,.merchant-credit-memo,.merchant-credit-memo-grid,.merchant-readiness-top,.merchant-readiness-grid,.merchant-setup-grid{grid-template-columns:1fr}.merchant-pilot-grid div{border-right:none;border-bottom:.5px solid var(--rule)}.merchant-pilot-grid div:last-child{border-bottom:none}}
+@media(max-width:900px){.merchant-pilot-grid,.merchant-readiness-top,.merchant-readiness-grid,.merchant-setup-grid{grid-template-columns:1fr}.merchant-pilot-grid div{border-right:none;border-bottom:.5px solid var(--rule)}.merchant-pilot-grid div:last-child{border-bottom:none}}
 `;

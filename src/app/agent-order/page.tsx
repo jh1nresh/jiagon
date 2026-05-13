@@ -520,21 +520,20 @@ export default function AgentOrderDemoPage() {
             </div>
           </div>
           <nav className="negotiator-nav" aria-label="Agent negotiator demo">
-            <Link href="/">Overview</Link>
-            <Link href="/merchant">Merchant Queue</Link>
-            <Link href="/passport">Receipt Proof</Link>
+            <Link href="/">Service</Link>
             <Link href="/api/agent">Agent API</Link>
+            <Link href="/merchant">Merchant Terminal</Link>
           </nav>
         </header>
 
         <section className="negotiator-hero">
           <div className="negotiator-card">
-            <div className="negotiator-kicker">Natural language &rarr; quote &rarr; order handoff</div>
-            <h1 className="negotiator-title">Ask for the outcome. Jiagon handles the merchant.</h1>
+            <div className="negotiator-kicker">Agent request console</div>
+            <h1 className="negotiator-title">Quote first. Order only if feasible.</h1>
             <p className="negotiator-copy">
-              This YC demo is intentionally narrow: Jiagon acts as a real-world merchant
-              negotiator. It checks whether the merchant can satisfy the request before it
-              creates an order, and it leaves a receipt trail after fulfillment.
+              This page is a thin operator surface for the same APIs an agent calls.
+              Use it to test budget, pickup time, stock, and handoff behavior before
+              showing the merchant terminal.
             </p>
 
             <div className="negotiator-form">
@@ -557,7 +556,7 @@ export default function AgentOrderDemoPage() {
               </div>
 
               <div className="negotiator-field">
-                <label htmlFor="agent-intent">What the user tells their agent</label>
+                <label htmlFor="agent-intent">User intent</label>
                 <textarea
                   id="agent-intent"
                   value={userIntent}
@@ -629,7 +628,7 @@ export default function AgentOrderDemoPage() {
 
               <div className="negotiator-actions">
                 <button className="negotiator-secondary" type="button" disabled={busy !== null} onClick={getQuote}>
-                  {busy === "quote" ? "Checking merchant..." : "1. Get quote"}
+                  {busy === "quote" ? "Checking..." : "Quote"}
                 </button>
                 <button
                   className="negotiator-primary"
@@ -637,7 +636,7 @@ export default function AgentOrderDemoPage() {
                   disabled={busy !== null || quoteFeasible === false}
                   onClick={createOrder}
                 >
-                  {busy === "order" ? "Creating handoff..." : "2. Create order"}
+                  {busy === "order" ? "Creating..." : "Create order"}
                 </button>
               </div>
 
@@ -653,8 +652,8 @@ export default function AgentOrderDemoPage() {
 
             {!quote && !order && !error && (
               <div className="negotiator-empty">
-                Start with a quote. Jiagon should refuse impossible constraints instead of blindly
-                placing the order. That is the core Call My Agent demo.
+                Start with a quote. The important behavior is refusal: Jiagon should not create
+                an order unless the merchant constraints can actually be met.
               </div>
             )}
 
@@ -722,11 +721,11 @@ export default function AgentOrderDemoPage() {
                   ))}
                 </ul>
                 <div className="negotiator-link-row">
-                  {order.urls?.nfcStation && <a className="negotiator-link" href={order.urls.nfcStation}>NFC station</a>}
+                  {order.urls?.nfcStation && <a className="negotiator-link" href={order.urls.nfcStation}>Claim station</a>}
                   {order.urls?.pairPhoneForNfcClaim && (
-                    <a className="negotiator-link primary" href={order.urls.pairPhoneForNfcClaim}>Pair receipt claim</a>
+                    <a className="negotiator-link primary" href={order.urls.pairPhoneForNfcClaim}>Receipt claim</a>
                   )}
-                  <Link className="negotiator-link" href="/merchant">Open merchant queue</Link>
+                  <Link className="negotiator-link" href="/merchant">Open merchant terminal</Link>
                 </div>
               </section>
             )}
