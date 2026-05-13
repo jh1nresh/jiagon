@@ -11,7 +11,13 @@ export type MerchantOrderItem = {
 };
 
 export type MerchantOrderStatus = "pending" | "accepted" | "preparing" | "completed" | "cancelled";
-export type MerchantOrderProofLevel = "order_intent_only" | "merchant_accepted" | "merchant_completed" | "customer_claimed" | "cancelled";
+export type MerchantOrderProofLevel =
+  | "order_intent_only"
+  | "merchant_accepted"
+  | "merchant_completed"
+  | "payment_backed"
+  | "customer_claimed"
+  | "cancelled";
 export type MerchantOrderPaymentProvider = "external_pos" | "moonpay_commerce" | "shopify" | "solana_pay";
 export type MerchantOrderPaymentStatus = "waiting_counter_payment" | "merchant_attested_paid" | "moonpay_verified_paid" | "shopify_verified_paid" | "solana_pay_verified_paid" | "cancelled";
 
@@ -264,12 +270,21 @@ function proofLevelForStatus(status: MerchantOrderStatus): MerchantOrderProofLev
   return "order_intent_only";
 }
 
+function proofLevelForCompletion(paymentStatus: MerchantOrderPaymentStatus): MerchantOrderProofLevel {
+  return paymentStatus === "merchant_attested_paid" ? "merchant_completed" : "payment_backed";
+}
+
 function isMerchantOrderStatus(value: unknown): value is MerchantOrderStatus {
   return value === "pending" || value === "accepted" || value === "preparing" || value === "completed" || value === "cancelled";
 }
 
 function isMerchantOrderProofLevel(value: unknown): value is MerchantOrderProofLevel {
-  return value === "order_intent_only" || value === "merchant_accepted" || value === "merchant_completed" || value === "customer_claimed" || value === "cancelled";
+  return value === "order_intent_only" ||
+    value === "merchant_accepted" ||
+    value === "merchant_completed" ||
+    value === "payment_backed" ||
+    value === "customer_claimed" ||
+    value === "cancelled";
 }
 
 function isMerchantOrderPaymentProvider(value: unknown): value is MerchantOrderPaymentProvider {
@@ -912,6 +927,8 @@ export async function completeMerchantOrderWithReceipt(input: {
   receiptPurpose?: string | null;
   receiptMemo?: string | null;
   expectedSubtotalCents?: number | null;
+  minimumPaidCents?: number | null;
+  expectedMerchantIds?: string[] | null;
 }): Promise<{
   configured: boolean;
   updated: boolean;
@@ -927,6 +944,9 @@ export async function completeMerchantOrderWithReceipt(input: {
   const completedPaymentStatus = input.paymentStatus || "merchant_attested_paid";
   const receiptPurpose = input.receiptPurpose?.trim() || DEFAULT_AGENTIC_ORDER_RECEIPT_PURPOSE;
   const receiptMemo = input.receiptMemo?.trim() || null;
+  const expectedMerchantIds = Array.from(new Set((input.expectedMerchantIds || [])
+    .map((merchantId) => merchantId.trim())
+    .filter(Boolean)));
   if (!pool) {
     const current = merchantOrderMemory().get(input.id) || null;
     if (!current) {
@@ -937,6 +957,16 @@ export async function completeMerchantOrderWithReceipt(input: {
         receiptPersisted: false,
         order: null,
         error: "Merchant order was not found.",
+      };
+    }
+    if (expectedMerchantIds.length > 0 && !expectedMerchantIds.includes(current.merchantId)) {
+      return {
+        configured: false,
+        updated: false,
+        receiptConfigured: false,
+        receiptPersisted: false,
+        order: current,
+        error: `Payment proof merchant does not match order merchant ${current.merchantId}.`,
       };
     }
     if (
@@ -951,6 +981,20 @@ export async function completeMerchantOrderWithReceipt(input: {
         receiptPersisted: false,
         order: current,
         error: `Payment amount ${input.expectedSubtotalCents} cents does not match order subtotal ${current.subtotalCents} cents.`,
+      };
+    }
+    if (
+      typeof input.minimumPaidCents === "number" &&
+      Number.isFinite(input.minimumPaidCents) &&
+      input.minimumPaidCents < current.subtotalCents
+    ) {
+      return {
+        configured: false,
+        updated: false,
+        receiptConfigured: false,
+        receiptPersisted: false,
+        order: current,
+        error: `Payment amount ${input.minimumPaidCents} cents is below order subtotal ${current.subtotalCents} cents.`,
       };
     }
     if (current.receiptClaimUrl) {
@@ -989,7 +1033,7 @@ export async function completeMerchantOrderWithReceipt(input: {
     const nextOrder: MerchantOrder = {
       ...current,
       status: "completed",
-      proofLevel: proofLevelForStatus("completed"),
+      proofLevel: proofLevelForCompletion(completedPaymentStatus),
       paymentProvider: completedPaymentProvider,
       paymentStatus: completedPaymentStatus,
       receiptId: receiptResult.receipt.id,
@@ -1061,6 +1105,17 @@ export async function completeMerchantOrderWithReceipt(input: {
         error: "Merchant order was not found.",
       };
     }
+    if (expectedMerchantIds.length > 0 && !expectedMerchantIds.includes(current.merchantId)) {
+      await client.query("rollback");
+      return {
+        configured: true,
+        updated: false,
+        receiptConfigured: false,
+        receiptPersisted: false,
+        order: current,
+        error: `Payment proof merchant does not match order merchant ${current.merchantId}.`,
+      };
+    }
     if (
       typeof input.expectedSubtotalCents === "number" &&
       Number.isFinite(input.expectedSubtotalCents) &&
@@ -1074,6 +1129,21 @@ export async function completeMerchantOrderWithReceipt(input: {
         receiptPersisted: false,
         order: current,
         error: `Payment amount ${input.expectedSubtotalCents} cents does not match order subtotal ${current.subtotalCents} cents.`,
+      };
+    }
+    if (
+      typeof input.minimumPaidCents === "number" &&
+      Number.isFinite(input.minimumPaidCents) &&
+      input.minimumPaidCents < current.subtotalCents
+    ) {
+      await client.query("rollback");
+      return {
+        configured: true,
+        updated: false,
+        receiptConfigured: false,
+        receiptPersisted: false,
+        order: current,
+        error: `Payment amount ${input.minimumPaidCents} cents is below order subtotal ${current.subtotalCents} cents.`,
       };
     }
     if (current.receiptClaimUrl) {
@@ -1128,7 +1198,7 @@ export async function completeMerchantOrderWithReceipt(input: {
     const nextOrder: MerchantOrder = {
       ...current,
       status: "completed",
-      proofLevel: proofLevelForStatus("completed"),
+      proofLevel: proofLevelForCompletion(completedPaymentStatus),
       paymentProvider: completedPaymentProvider,
       paymentStatus: completedPaymentStatus,
       receiptId: receiptResult.receipt.id,

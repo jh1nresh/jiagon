@@ -3,6 +3,7 @@ import {
   moonPayDirectReceiptNumber,
   moonPayPaymentCurrencyError,
   moonPayPaymentAmountCents,
+  moonPayPaylinkAllowlistError,
   moonPayReceiptMemo,
   moonPayWebhookSharedToken,
   parseMoonPayCommercePaymentProof,
@@ -146,6 +147,19 @@ export async function POST(request: Request) {
   }
 
   if (proof.orderId) {
+    const bindingError = proof.jiagonMerchantId
+      ? null
+      : moonPayPaylinkAllowlistError(proof, "order attachment");
+    if (bindingError) {
+      return Response.json(
+        {
+          error: bindingError,
+          paymentProof: proof,
+        },
+        { status: bindingError.includes("requires") ? 503 : 422 },
+      );
+    }
+
     const result = await completeMerchantOrderWithReceipt({
       id: proof.orderId,
       origin,
@@ -155,6 +169,7 @@ export async function POST(request: Request) {
       receiptPurpose: "moonpay_commerce_payment_receipt",
       receiptMemo: moonPayReceiptMemo(proof),
       expectedSubtotalCents: amountCents,
+      expectedMerchantIds: [proof.jiagonMerchantId, proof.merchantId].filter((value): value is string => Boolean(value)),
     });
 
     if (result.order && result.updated) {
